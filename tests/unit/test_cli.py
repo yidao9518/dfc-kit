@@ -46,9 +46,9 @@ def write_tsv(path: Path, header: list[str], rows: list[list[object]]) -> None:
 
 
 class CLITests(unittest.TestCase):
-    def _write_run(self, root: Path, run: int) -> None:
-        func = root / "sub-001" / "ses-off" / "func"
-        stem = f"sub-001_ses-off_task-rest_run-{run}"
+    def _write_run(self, root: Path, run: int, *, subject: str = "sub-001") -> None:
+        func = root / subject / "ses-off" / "func"
+        stem = f"{subject}_ses-off_task-rest_run-{run}"
         spatial = f"{stem}_space-MNI152NLin2009cAsym"
         values = np.column_stack(
             (
@@ -134,6 +134,15 @@ class CLITests(unittest.TestCase):
                     "sub-001_ses-off_task-rest_run-2",
                 ],
             )
+            self.assertEqual(
+                set(inspected["acquisitions"][0]["files"]),
+                {"Example"},
+            )
+            self.assertTrue(
+                inspected["acquisitions"][0]["files"]["Example"]["timeseries"].endswith(
+                    "_atlas-Example_stat-mean_timeseries.tsv"
+                )
+            )
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
@@ -193,6 +202,93 @@ class CLITests(unittest.TestCase):
             self.assertEqual(ets_summary["method"], "ets")
             self.assertEqual(ets_summary["n_runs"], 2)
             self.assertEqual(FeatureStore.open(ets_output).n_sequences, 2)
+
+            self._write_run(root, 1, subject="sub-002")
+            selected_output = Path(temporary) / "selected.store"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                status = main(
+                    [
+                        "inspect-xcpd",
+                        str(root),
+                        "--atlas",
+                        "Example",
+                        "--space",
+                        "MNI152NLin2009cAsym",
+                        "--subject",
+                        "sub-001",
+                        "--subject",
+                        "sub-002",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            selected = json.loads(stdout.getvalue())
+            self.assertEqual(selected["n_acquisitions"], 3)
+            self.assertEqual(
+                {item["subject"] for item in selected["acquisitions"]},
+                {"001", "002"},
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                status = main(
+                    [
+                        "build-store",
+                        str(root),
+                        str(selected_output),
+                        "--atlas",
+                        "Example",
+                        "--space",
+                        "MNI152NLin2009cAsym",
+                        "--subject",
+                        "sub-001",
+                        "--subject",
+                        "sub-002",
+                        "--roi-selection",
+                        str(roi_file),
+                        "--method",
+                        "window-fc",
+                        "--window-length",
+                        "4",
+                        "--window-step",
+                        "2",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            selected_summary = json.loads(stdout.getvalue())
+            self.assertEqual(selected_summary["subjects"], ["sub-001", "sub-002"])
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                status = main(
+                    [
+                        "inspect-xcpd",
+                        str(root),
+                        "--atlas",
+                        "Example",
+                        "--subject",
+                        "sub-001",
+                        "--subject",
+                        "001",
+                    ]
+                )
+            self.assertEqual(status, 2)
+            self.assertIn("must be unique", stderr.getvalue())
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                status = main(
+                    [
+                        "inspect-xcpd",
+                        str(root),
+                        "--atlas",
+                        "Example",
+                        "--subject",
+                        "",
+                    ]
+                )
+            self.assertEqual(status, 2)
+            self.assertIn("must be non-empty", stderr.getvalue())
 
     def test_invalid_roi_json_returns_an_error_status(self):
         with TemporaryDirectory() as temporary:

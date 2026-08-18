@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.1] - 2026-08-19
+
+### Fixed
+
+- Repeated XCP-D `--subject` filters now select all requested subjects rather
+  than silently retaining only the last command-line value.
+- `inspect-xcpd` inventories retain atlas time-series and coverage paths for
+  downstream provenance checks.
+
 ## [0.24.0] - 2026-08-18
 
 ### Added

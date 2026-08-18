@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .connectivity import SlidingWindowFC
+from .data import TimeSeriesDataset
 from .io import (
     StatePredictions,
     compare_state_model_scores,
@@ -88,7 +89,11 @@ def _add_xcpd_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         help="atlas name; repeat for multiple atlases",
     )
-    parser.add_argument("--subject", help="optional BIDS subject label or value")
+    parser.add_argument(
+        "--subject",
+        action="append",
+        help="optional BIDS subject label or value; repeat to select multiple subjects",
+    )
     parser.add_argument("--session", help="optional BIDS session label or value")
     parser.add_argument("--task", help="optional BIDS task label or value")
     parser.add_argument("--space", help="optional XCP-D standard-space label")
@@ -131,18 +136,41 @@ def _load_roi_selection(path: Path | None) -> dict[str, tuple[str, ...]] | None:
     return output
 
 
-def _filters(namespace: argparse.Namespace) -> dict[str, object]:
+def _filters(namespace: argparse.Namespace, *, subject: str | None = None) -> dict[str, object]:
     return {
         "atlases": tuple(namespace.atlas),
-        "subject": namespace.subject,
+        "subject": subject,
         "session": namespace.session,
         "task": namespace.task,
         "space": namespace.space,
     }
 
 
+def _selected_xcpd_subjects(namespace: argparse.Namespace) -> tuple[str | None, ...]:
+    subjects = namespace.subject
+    if subjects is None:
+        return (None,)
+    values = tuple(str(subject).strip().removeprefix("sub-") for subject in subjects)
+    if any(not subject for subject in values):
+        raise ValueError("--subject values must be non-empty")
+    normalized = tuple(f"sub-{subject}" for subject in values)
+    unique = tuple(dict.fromkeys(normalized))
+    if len(unique) != len(subjects):
+        raise ValueError("--subject values must be unique")
+    return unique
+
+
+def _discover_selected_xcpd_runs(namespace: argparse.Namespace):
+    discovered = []
+    for subject in _selected_xcpd_subjects(namespace):
+        discovered.extend(
+            discover_xcpd_runs(namespace.root, **_filters(namespace, subject=subject))
+        )
+    return tuple(discovered)
+
+
 def _inspect(namespace: argparse.Namespace) -> dict[str, object]:
-    files = discover_xcpd_runs(namespace.root, **_filters(namespace))
+    files = _discover_selected_xcpd_runs(namespace)
     acquisitions = []
     for item in files:
         stem = item.outliers.name.removesuffix("_outliers.tsv")
@@ -158,6 +186,13 @@ def _inspect(namespace: argparse.Namespace) -> dict[str, object]:
                 "session": entities.get("ses"),
                 "task": entities.get("task"),
                 "atlases": [atlas.atlas for atlas in item.atlases],
+                "files": {
+                    atlas.atlas: {
+                        "timeseries": str(atlas.timeseries),
+                        "coverage": str(atlas.coverage),
+                    }
+                    for atlas in item.atlases
+                },
                 "outliers": str(item.outliers),
                 "motion": None if item.motion is None else str(item.motion),
             }
@@ -167,13 +202,17 @@ def _inspect(namespace: argparse.Namespace) -> dict[str, object]:
 
 def _build_store(namespace: argparse.Namespace) -> dict[str, object]:
     selection = _load_roi_selection(namespace.roi_selection)
-    dataset = load_xcpd_dataset(
-        namespace.root,
-        roi_names=selection,
-        minimum_coverage=namespace.minimum_coverage,
-        tr=namespace.tr,
-        **_filters(namespace),
+    datasets = tuple(
+        load_xcpd_dataset(
+            namespace.root,
+            roi_names=selection,
+            minimum_coverage=namespace.minimum_coverage,
+            tr=namespace.tr,
+            **_filters(namespace, subject=subject),
+        )
+        for subject in _selected_xcpd_subjects(namespace)
     )
+    dataset = TimeSeriesDataset(tuple(run for item in datasets for run in item.runs))
     if namespace.method == "window-fc":
         estimator = SlidingWindowFC(
             length=namespace.window_length,

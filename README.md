@@ -15,7 +15,7 @@ The repository is independent from the Parkinson medication-intervention
 research repository. The research workflows remain unchanged and serve only as
 reference implementations for numerical regression tests.
 
-Implemented through `v0.24.0`:
+Implemented through `v0.24.1`:
 
 - discovery and validation of XCP-D parcellated derivatives;
 - single- or multi-atlas ROI loading with coverage alignment;
@@ -110,7 +110,7 @@ fMRIPrep-to-XCP-D denoising, filtering, censoring, or parcellation. The array
 API remains available as the internal mathematical contract and for advanced
 users who already have equivalently preprocessed ROI time series.
 
-Version `0.24.0` is prepared as a public alpha. Synthetic performance
+Version `0.24.1` is prepared as a public alpha. Synthetic performance
 profiling, chunked feature storage, and out-of-core state fitting are included
 for high-dimensional outputs.
 
