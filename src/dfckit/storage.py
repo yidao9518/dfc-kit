@@ -15,6 +15,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from .connectivity.correlation import edge_index, weighted_correlation
 from .connectivity.ets import segment_standardized_samples
+from .connectivity.mtd import globally_standardized_derivatives
 from .connectivity.windows import SlidingWindowFC
 from .data import TimeSeriesDataset, TimeSeriesRun
 from .states.data import FeatureKey, FeatureSequence, FeatureSequenceDataset
@@ -752,6 +753,67 @@ def write_window_fc_store(
     )
     for run in dataset.runs:
         append_window_fc(store, run, estimator, chunk_size=chunk_size)
+    return store
+
+
+def append_mtd(
+    store: FeatureStore,
+    run: TimeSeriesRun,
+    *,
+    chunk_size: int = 128,
+) -> None:
+    """Compute and append run-standardized MTD in bounded row chunks."""
+    if run.subject is None:
+        raise ValueError("stored MTD requires a subject identifier")
+    size = _validated_chunk_size(chunk_size)
+    keys = _edge_feature_keys(run.roi_names)
+    contract = "mtd:difference=within-segment;normalization=run"
+    store.require_contract(
+        feature_keys=keys,
+        source_contract=contract,
+        sample_interval_seconds=run.tr,
+    )
+    derivatives, starts, ends, segment_ids = globally_standardized_derivatives(run)
+    edge_i, edge_j = edge_index(run.n_rois)
+    for segment_id in dict.fromkeys(segment_ids.tolist()):
+        positions = np.flatnonzero(segment_ids == segment_id)
+
+        def parts(
+            segment_positions: NDArray[np.int64] = positions,
+        ) -> Iterator[tuple[NDArray, NDArray, NDArray]]:
+            for first in range(0, len(segment_positions), size):
+                selected = segment_positions[first : first + size]
+                values = derivatives[selected]
+                yield values[:, edge_i] * values[:, edge_j], starts[selected], ends[selected]
+
+        store.append_sequence_parts(
+            parts(),
+            subject=run.subject,
+            session=run.session,
+            segment_id=int(segment_id),
+            acquisition_id=run.acquisition_id,
+        )
+
+
+def write_mtd_store(
+    root: str | Path,
+    runs: Sequence[TimeSeriesRun],
+    *,
+    chunk_size: int = 128,
+    dtype: str | np.dtype = "float64",
+) -> FeatureStore:
+    """Create a store and stream run-standardized MTD from compatible runs."""
+    dataset = TimeSeriesDataset(runs)
+    dataset.require_subject_ids("stored MTD")
+    store = FeatureStore.create(
+        root,
+        feature_keys=_edge_feature_keys(dataset.roi_names),
+        source_contract="mtd:difference=within-segment;normalization=run",
+        sample_interval_seconds=dataset.tr,
+        dtype=dtype,
+    )
+    for run in dataset.runs:
+        append_mtd(store, run, chunk_size=chunk_size)
     return store
 
 

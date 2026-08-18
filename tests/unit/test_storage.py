@@ -6,12 +6,14 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from dfckit import TimeSeriesRun
-from dfckit.connectivity import ETS, SlidingWindowFC
+from dfckit.connectivity import ETS, MTD, SlidingWindowFC
 from dfckit.states import FeatureSequence, FeatureSequenceDataset, window_fc_sequences
 from dfckit.storage import (
     FeatureStore,
+    append_mtd,
     append_window_fc,
     write_ets_store,
+    write_mtd_store,
     write_window_fc_store,
 )
 
@@ -330,6 +332,34 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
             np.testing.assert_array_equal(features, expected.features)
             np.testing.assert_array_equal(starts, expected.original_indices)
             self.assertTrue(all(chunk.values.shape[0] <= 5 for chunk in store.iter_chunks()))
+
+    def test_streamed_mtd_matches_materialized_result_and_preserves_gap_segments(self):
+        expected = MTD().transform(self.run)
+        with TemporaryDirectory() as temporary:
+            store = write_mtd_store(
+                Path(temporary) / "mtd",
+                (self.run,),
+                chunk_size=5,
+            )
+            observed = store.read_dataset()
+            features = np.concatenate([sequence.values for sequence in observed.sequences])
+            starts = np.concatenate(
+                [sequence.sample_start_indices for sequence in observed.sequences]
+            )
+            ends = np.concatenate(
+                [sequence.sample_end_indices for sequence in observed.sequences]
+            )
+
+            np.testing.assert_allclose(features, expected.features)
+            np.testing.assert_array_equal(starts, expected.start_frames)
+            np.testing.assert_array_equal(ends, expected.end_frames)
+            self.assertEqual(store.source_contract, "mtd:difference=within-segment;normalization=run")
+            self.assertEqual(store.sequence_identities[0][3], 0)
+            self.assertEqual(store.sequence_identities[1][3], 1)
+            self.assertTrue(all(chunk.values.shape[0] <= 5 for chunk in store.iter_chunks()))
+
+            with self.assertRaisesRegex(ValueError, "already contains"):
+                append_mtd(store, self.run, chunk_size=5)
 
 
 if __name__ == "__main__":

@@ -152,8 +152,10 @@ and correction scope. NBS remains explicitly experimental.
 from dfckit.storage import (
     FeatureStore,
     append_ets,
+    append_mtd,
     append_window_fc,
     write_ets_store,
+    write_mtd_store,
     write_window_fc_store,
 )
 ```

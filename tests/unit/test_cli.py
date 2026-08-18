@@ -52,7 +52,7 @@ class CLITests(unittest.TestCase):
         spatial = f"{stem}_space-MNI152NLin2009cAsym"
         values = np.column_stack(
             (
-                np.arange(6, dtype=float) + run,
+                np.arange(6, dtype=float) ** 2 + run,
                 np.asarray([0.0, 1.0, 0.0, -1.0, 0.0, 1.0]) + run,
             )
         )
@@ -202,6 +202,36 @@ class CLITests(unittest.TestCase):
             self.assertEqual(ets_summary["method"], "ets")
             self.assertEqual(ets_summary["n_runs"], 2)
             self.assertEqual(FeatureStore.open(ets_output).n_sequences, 2)
+
+            mtd_output = Path(temporary) / "mtd.store"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                status = main(
+                    [
+                        "build-store",
+                        str(root),
+                        str(mtd_output),
+                        "--atlas",
+                        "Example",
+                        "--space",
+                        "MNI152NLin2009cAsym",
+                        "--roi-selection",
+                        str(roi_file),
+                        "--method",
+                        "mtd",
+                        "--chunk-size",
+                        "2",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            mtd_summary = json.loads(stdout.getvalue())
+            self.assertEqual(mtd_summary["method"], "mtd")
+            self.assertEqual(mtd_summary["n_runs"], 2)
+            self.assertEqual(mtd_summary["n_samples"], 10)
+            self.assertEqual(
+                FeatureStore.open(mtd_output).source_contract,
+                "mtd:difference=within-segment;normalization=run",
+            )
 
             self._write_run(root, 1, subject="sub-002")
             selected_output = Path(temporary) / "selected.store"

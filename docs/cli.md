@@ -61,6 +61,22 @@ dfc-kit build-store /path/to/xcp_d /path/to/features/ets.store \
   --tr 0.75
 ```
 
+Build a run-standardized MTD store. MTD differences are formed only within
+contiguous retained segments, and the output keeps the original derivative
+start/end frames:
+
+```bash
+dfc-kit build-store /path/to/xcp_d /path/to/features/mtd.store \
+  --atlas Glasser \
+  --atlas Tian \
+  --space MNI152NLin2009cAsym \
+  --task rest \
+  --roi-selection rois.json \
+  --method mtd \
+  --chunk-size 256 \
+  --tr 0.75
+```
+
 The output JSON reports run count, subject IDs, acquisition IDs, sequence and
 feature counts, and the FeatureStore format version. Output directories must
 be new; an existing store is never silently overwritten.

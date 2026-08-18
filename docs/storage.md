@@ -50,6 +50,25 @@ frame-by-edge product matrix is created and written only in bounded row chunks.
 Use `ETS().rss()` instead when only co-fluctuation amplitude is required; that
 algebraic path avoids edge materialization entirely.
 
+## Stream MTD
+
+```python
+from dfckit.storage import write_mtd_store
+
+store = write_mtd_store(
+    "/path/to/mtd.store",
+    runs,
+    chunk_size=128,
+)
+```
+
+The MTD writer uses the same run-level derivative standardization as
+`MTD().transform`. It writes one FeatureStore sequence per censor-bounded
+segment, with each row's original derivative start and end frame preserved.
+The source contract is
+`mtd:difference=within-segment;normalization=run`; it is therefore distinct
+from the segment-normalized ETS contract.
+
 ## Read and append
 
 ```python

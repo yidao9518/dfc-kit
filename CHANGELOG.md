@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-08-19
+
+### Added
+
+- A bounded-memory `build-store --method mtd` writer that persists run-level,
+  censor-gap-safe MTD edge products in FeatureStore v2 while retaining original
+  derivative start/end frames and the MTD source contract.
+
+### Verified
+
+- Agent-driven replay of 116 ROI32 ON/OFF acquisitions reproduced all historical
+  MTD session block means within `2.22e-16` and the paired visual--sensorimotor/6d
+  result (`Delta=-0.0618114702`, `p=.00859914`, `q=.02579742`) exactly.
+
 ## [0.24.1] - 2026-08-19
 
 ### Fixed
