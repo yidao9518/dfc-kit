@@ -5,13 +5,20 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from dfckit import TimeSeriesRun
+from dfckit import TimeSeriesDataset, TimeSeriesRun
 from dfckit.connectivity import ETS, MTD, SlidingWindowFC
-from dfckit.states import FeatureSequence, FeatureSequenceDataset, window_fc_sequences
+from dfckit.states import (
+    FeatureSequence,
+    FeatureSequenceDataset,
+    cap_sequences,
+    window_fc_sequences,
+)
 from dfckit.storage import (
     FeatureStore,
+    append_cap,
     append_mtd,
     append_window_fc,
+    write_cap_store,
     write_ets_store,
     write_mtd_store,
     write_window_fc_store,
@@ -332,6 +339,42 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
             np.testing.assert_array_equal(features, expected.features)
             np.testing.assert_array_equal(starts, expected.original_indices)
             self.assertTrue(all(chunk.values.shape[0] <= 5 for chunk in store.iter_chunks()))
+
+    def test_streamed_cap_matches_materialized_segment_patterns(self):
+        expected = cap_sequences(TimeSeriesDataset((self.run,)))
+        with TemporaryDirectory() as temporary:
+            store = write_cap_store(
+                Path(temporary) / "cap",
+                (self.run,),
+                chunk_size=5,
+            )
+            observed = store.read_dataset()
+
+            self.assertEqual(store.source_contract, expected.source_contract)
+            self.assertEqual(store.feature_keys, expected.feature_keys)
+            self.assertEqual(store.n_samples, expected.n_samples)
+            self.assertEqual(store.n_sequences, len(expected.sequences))
+            for left, right in zip(observed.sequences, expected.sequences, strict=True):
+                np.testing.assert_array_equal(left.values, right.values)
+                np.testing.assert_array_equal(
+                    left.sample_start_indices, right.sample_start_indices
+                )
+                np.testing.assert_array_equal(left.sample_end_indices, right.sample_end_indices)
+
+            with self.assertRaisesRegex(ValueError, "already contains"):
+                append_cap(store, self.run, chunk_size=5)
+
+    def test_streamed_cap_reports_cap_when_all_segments_are_too_short(self):
+        run = TimeSeriesRun(
+            values=np.asarray([[1.0, 2.0], [3.0, 4.0]]),
+            original_indices=[0, 2],
+            roi_names=("visual", "motor"),
+            subject="sub-001",
+            session="off",
+            tr=0.8,
+        )
+        with TemporaryDirectory() as temporary, self.assertRaisesRegex(ValueError, "CAP requires"):
+            write_cap_store(Path(temporary) / "cap", (run,))
 
     def test_streamed_mtd_matches_materialized_result_and_preserves_gap_segments(self):
         expected = MTD().transform(self.run)

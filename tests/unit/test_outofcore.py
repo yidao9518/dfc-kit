@@ -7,12 +7,13 @@ import numpy as np
 
 from dfckit.outofcore import (
     fit_incremental_pca_store,
+    fit_kmeans_store_materialized,
     fit_minibatch_kmeans_store,
     iter_pca_store_chunks,
     predict_kmeans_store,
     score_kmeans_store,
 )
-from dfckit.states import FeatureSequence, FeatureSequenceDataset
+from dfckit.states import FeatureSequence, FeatureSequenceDataset, fit_kmeans_states
 from dfckit.storage import FeatureStore
 
 HAS_STATES_EXTRA = importlib.util.find_spec("sklearn") is not None
@@ -62,6 +63,47 @@ class StreamingStoreMixin:
 
 @unittest.skipUnless(HAS_STATES_EXTRA, "requires dfc-kit[states]")
 class StreamingKMeansTests(StreamingStoreMixin, unittest.TestCase):
+
+    def test_materialized_store_fit_matches_direct_minibatch_path_exactly(self):
+        with TemporaryDirectory() as temporary:
+            store = self._store(Path(temporary) / "features", chunk_size=4)
+            subjects = ("sub-000", "sub-001", "sub-002")
+            dataset = store.read_dataset(subjects=subjects)
+            expected = fit_kmeans_states(
+                dataset,
+                n_states=2,
+                seed=17,
+                n_init=4,
+                max_iter=30,
+                algorithm="minibatch",
+                standardize_features=False,
+                batch_size=16,
+                reassignment_ratio=0.01,
+            )
+            observed = fit_kmeans_store_materialized(
+                store,
+                subjects=subjects,
+                n_states=2,
+                seed=17,
+                n_init=4,
+                max_iter=30,
+                algorithm="minibatch",
+                standardize_features=False,
+                batch_size=16,
+                reassignment_ratio=0.01,
+            )
+
+            np.testing.assert_array_equal(observed.model.centers, expected.model.centers)
+            np.testing.assert_array_equal(
+                np.concatenate([item.labels for item in observed.assignments.sequences]),
+                np.concatenate([item.labels for item in expected.assignments.sequences]),
+            )
+            self.assertAlmostEqual(observed.model.inertia, expected.model.inertia, places=14)
+            self.assertEqual(
+                observed.model.training_data_fingerprint,
+                store.data_fingerprint(subjects=subjects),
+            )
+            self.assertIn("materialized FeatureStore fit", observed.model.implementation)
 
     def test_standardization_is_streaming_and_fit_is_deterministic(self):
         with TemporaryDirectory() as temporary:

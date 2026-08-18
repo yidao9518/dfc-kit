@@ -15,7 +15,7 @@ The repository is independent from the Parkinson medication-intervention
 research repository. The research workflows remain unchanged and serve only as
 reference implementations for numerical regression tests.
 
-Implemented through `v0.25.0`:
+Implemented through `v0.26.0`:
 
 - discovery and validation of XCP-D parcellated derivatives;
 - single- or multi-atlas ROI loading with coverage alignment;
@@ -49,10 +49,16 @@ Implemented through `v0.25.0`:
 - experimental paired NBS with direction-separated components, participant-level
   sign flips, edge-extent or intensity statistics, and fixed-threshold sensitivity.
 - append-only, memory-mappable chunk stores and bounded-memory streaming writers
-  for sliding-window FC and complete ETS.
+  for sliding-window FC, CAP, MTD, and complete ETS.
+- censor-gap-safe CAP FeatureStore writing: instantaneous ROI vectors are
+  standardized within each retained segment and preserve original frame indices
+  and segment identity.
 - out-of-core MiniBatchKMeans fitting and prediction directly from feature stores,
   with deterministic initialization, streaming standardization, and participant
   overlap protection.
+- materialized FeatureStore KMeans fitting for reproducing a complete scikit-learn
+  `KMeans.fit` or `MiniBatchKMeans.fit` call on a selected cohort while retaining
+  FeatureStore identities and training-data fingerprints.
 - out-of-core IncrementalPCA and Gaussian HMM fitting/decoding: only reduced
   observations are materialized, while censor-bounded sequence lengths remain
   explicit.
@@ -65,7 +71,7 @@ Implemented through `v0.25.0`:
   sequences, out-of-core metadata, and FeatureStore v2, with v1 compatibility;
 - batch XCP-D acquisition discovery and dataset loading that preserves
   task/acq/run filename entities.
-- a dependency-light `dfc-kit` CLI for XCP-D inspection and window-FC/ETS/MTD
+- a dependency-light `dfc-kit` CLI for XCP-D inspection and window-FC/CAP/ETS/MTD
   store construction from JSON ROI selections.
 - a `fit-states` CLI that fits out-of-core MiniBatchKMeans or PCA-reduced
   Gaussian HMM models from FeatureStores and writes portable model artifacts.
@@ -110,9 +116,17 @@ fMRIPrep-to-XCP-D denoising, filtering, censoring, or parcellation. The array
 API remains available as the internal mathematical contract and for advanced
 users who already have equivalently preprocessed ROI time series.
 
-Version `0.25.0` is prepared as a public alpha. Synthetic performance
+Version `0.26.0` is prepared as a public alpha. Synthetic performance
 profiling, chunked feature storage, and out-of-core state fitting are included
 for high-dimensional outputs.
+
+CAP FeatureStores contain one instantaneous ROI value per feature, rather than
+an ROI-pair connectivity edge. Each uninterrupted retained segment is
+standardized independently, ROI by ROI, using population standard deviation
+(`ddof=0`) before its rows are written. The resulting source contract is
+`cap:within-segment-roi-zscore-ddof0`. When fitting a CAP model from this store,
+disable the generic pooled feature standardization (`--no-standardize-features`)
+to preserve the CAP geometry.
 
 ## Example
 

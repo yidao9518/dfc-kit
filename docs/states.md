@@ -85,6 +85,27 @@ segment is centered and scaled ROI by ROI before fitting. The CAP wrapper uses
 MiniBatchKMeans and does not apply a second pooled feature standardization.
 CAP centroids are co-activation patterns, not connectivity matrices.
 
+For a disk-backed XCP-D cohort, build the equivalent CAP FeatureStore with
+`dfc-kit build-store --method cap` or `write_cap_store`. The store uses the
+source contract `cap:within-segment-roi-zscore-ddof0`, one ROI feature per row,
+and one sequence per uninterrupted retained segment. Its rows preserve the
+original frame indices, and segments shorter than two retained frames are
+omitted. To reproduce the in-memory CAP wrapper from that store, use materialized
+MiniBatchKMeans with `--no-standardize-features`:
+
+```bash
+dfc-kit fit-states cap.store models/cap-k5.model \
+  --method kmeans --n-states 5 --seed 20260818 \
+  --n-init 20 --max-iter 300 \
+  --fitting-mode materialized --algorithm minibatch \
+  --no-standardize-features
+```
+
+Materialized fitting loads the selected cohort and calls one complete
+`MiniBatchKMeans.fit`; it is therefore intended for moderate stores and can
+reproduce historical native geometry. The default CLI path is bounded-memory
+streaming `MiniBatchKMeans.partial_fit`, which is a different fitting contract.
+
 ## LEiDA states
 
 ```python

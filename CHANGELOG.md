@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-08-19
+
+### Added
+
+- A censor-gap-safe CAP FeatureStore writer with the explicit
+  `cap:within-segment-roi-zscore-ddof0` source contract.
+- A materialized FeatureStore KMeans mode for reproducing historical
+  `MiniBatchKMeans.fit` or `KMeans.fit` analyses while retaining store
+  identities and data fingerprints.
+- CLI and regression coverage for CAP stores and native-geometry KMeans fits.
+
 ## [0.25.0] - 2026-08-19
 
 ### Added

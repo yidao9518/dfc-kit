@@ -10,13 +10,13 @@ for the returned assignments.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .states.data import FeatureKey, StateAssignments, StateLabelSequence, _readonly
-from .states.kmeans import KMeansFitResult, KMeansStateModel
+from .states.kmeans import KMeansFitResult, KMeansStateModel, fit_kmeans_states
 from .states.scoring import RunKMeansScore
 from .storage import FeatureStore, StoredFeatureChunk
 
@@ -661,6 +661,47 @@ def fit_minibatch_kmeans_store(
     return KMeansFitResult(model=model, assignments=assignments)
 
 
+def fit_kmeans_store_materialized(
+    store: FeatureStore,
+    *,
+    n_states: int,
+    seed: int,
+    n_init: int = 20,
+    max_iter: int = 300,
+    algorithm: str = "minibatch",
+    batch_size: int = 4096,
+    standardize_features: bool = True,
+    reassignment_ratio: float = 0.01,
+    subjects: Iterable[str] | None = None,
+) -> KMeansFitResult:
+    """Fit the exact in-memory sklearn path after reading a selected store cohort.
+
+    This mode is intended for moderate stores whose historical analysis used one
+    complete ``KMeans.fit`` or ``MiniBatchKMeans.fit`` call. It preserves the
+    store's identities and fingerprint while making the higher memory cost
+    explicit to callers.
+    """
+    fit_subjects = _subjects(store, subjects)
+    dataset = store.read_dataset(subjects=fit_subjects)
+    fit = fit_kmeans_states(
+        dataset,
+        n_states=n_states,
+        seed=seed,
+        n_init=n_init,
+        max_iter=max_iter,
+        algorithm=algorithm,
+        standardize_features=standardize_features,
+        batch_size=batch_size,
+        reassignment_ratio=reassignment_ratio,
+    )
+    model = replace(
+        fit.model,
+        training_data_fingerprint=store.data_fingerprint(subjects=fit_subjects),
+        implementation=f"{fit.model.implementation}; materialized FeatureStore fit",
+    )
+    return KMeansFitResult(model=model, assignments=fit.assignments)
+
+
 def predict_kmeans_store(
     model: KMeansStateModel,
     store: FeatureStore,
@@ -745,6 +786,7 @@ __all__ = [
     "StreamingPCAModel",
     "TransformedFeatureChunk",
     "fit_incremental_pca_store",
+    "fit_kmeans_store_materialized",
     "fit_minibatch_kmeans_store",
     "iter_pca_store_chunks",
     "predict_kmeans_store",

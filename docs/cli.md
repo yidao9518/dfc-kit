@@ -81,10 +81,33 @@ The output JSON reports run count, subject IDs, acquisition IDs, sequence and
 feature counts, and the FeatureStore format version. Output directories must
 be new; an existing store is never silently overwritten.
 
+Build an instantaneous CAP pattern store. CAP uses one feature per selected ROI
+and standardizes each ROI independently within every uninterrupted retained
+segment before writing rows:
+
+```bash
+dfc-kit build-store /path/to/xcp_d /path/to/features/cap.store \
+  --atlas Glasser \
+  --atlas Tian \
+  --space MNI152NLin2009cAsym \
+  --task rest \
+  --roi-selection rois.json \
+  --method cap \
+  --chunk-size 256 \
+  --tr 0.75
+```
+
+The store source contract is
+`cap:within-segment-roi-zscore-ddof0`. A censor-bounded segment shorter than
+two retained frames is omitted; all other rows retain the original frame index
+and segment ID. CAP stores contain ROI patterns, not FC edges.
+
 ## Fit a state model
 
-Fit out-of-core MiniBatchKMeans directly from a FeatureStore and save a
-pickle-free fitted-model artifact:
+By default, `fit-states --method kmeans` uses `--fitting-mode streaming` with
+`--algorithm minibatch`. It fits directly from memory-mapped FeatureStore
+chunks, performs bounded-memory standardization and deterministic initialization,
+and updates scikit-learn `MiniBatchKMeans` with repeated `partial_fit` passes:
 
 ```bash
 dfc-kit fit-states /path/to/features/window-fc.store /path/to/models/k4.model \
@@ -95,6 +118,52 @@ dfc-kit fit-states /path/to/features/window-fc.store /path/to/models/k4.model \
   --max-iter 10 \
   --batch-size 4096
 ```
+
+Streaming KMeans accepts only `--algorithm minibatch`; `--algorithm lloyd` is
+rejected in this mode. `--init-sample-size` controls the bounded initialization
+sample and is also streaming-only.
+
+To reproduce a historical in-memory fit, select materialized mode. This reads
+the selected subjects into a complete `FeatureSequenceDataset` and calls one
+scikit-learn `.fit` operation. Lloyd and MiniBatch are distinct estimators:
+
+```bash
+# Complete KMeans.fit using Lloyd updates.
+dfc-kit fit-states /path/to/features/cap.store /path/to/models/cap-lloyd.model \
+  --method kmeans \
+  --n-states 5 \
+  --seed 20260818 \
+  --n-init 20 \
+  --max-iter 300 \
+  --fitting-mode materialized \
+  --algorithm lloyd \
+  --no-standardize-features
+
+# Complete MiniBatchKMeans.fit, matching the in-memory CAP wrapper.
+dfc-kit fit-states /path/to/features/cap.store /path/to/models/cap-k5.model \
+  --method kmeans \
+  --n-states 5 \
+  --seed 20260818 \
+  --n-init 20 \
+  --max-iter 300 \
+  --fitting-mode materialized \
+  --algorithm minibatch \
+  --batch-size 4096 \
+  --no-standardize-features
+```
+
+Materialized mode has no bounded-memory guarantee. The CAP writer has already
+performed within-segment ROI z-scoring under the
+`cap:within-segment-roi-zscore-ddof0` contract, so CAP reproduction should use
+`--no-standardize-features`. Leaving the default
+`--standardize-features` enabled performs a second pooled scaling over CAP rows
+and therefore defines a different model. For a large store, use streaming mode
+instead and treat its `partial_fit` semantics as distinct from historical
+`MiniBatchKMeans.fit`.
+
+The `--fitting-mode` and `--algorithm` options apply to KMeans. The HMM path
+continues to use its streaming PCA/HMM implementation and explicit
+censor-bounded sequence lengths:
 
 Fit a Gaussian HMM after streaming PCA reduction:
 
@@ -118,7 +187,7 @@ prediction APIs reject overlap by default.
 The output directory contains a strict JSON manifest and numeric NPZ arrays,
 never pickle. It must not already exist. The command prints a JSON summary with
 the model kind, output path, fitted subjects, sample/sequence counts, state
-count, seed, and method-specific fit diagnostics. KMeans reports inertia;
+count, seed, fitting mode, and method-specific fit diagnostics. KMeans reports inertia;
 HMM reports convergence, log likelihood, PCA dimension, and omitted short
 sequences. Training assignments are not written implicitly.
 

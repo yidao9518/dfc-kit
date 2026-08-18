@@ -35,6 +35,7 @@ HAS_HMM_EXTRA = (
     importlib.util.find_spec("hmmlearn") is not None
     and importlib.util.find_spec("sklearn") is not None
 )
+HAS_STATES_EXTRA = importlib.util.find_spec("sklearn") is not None
 
 
 def write_tsv(path: Path, header: list[str], rows: list[list[object]]) -> None:
@@ -202,6 +203,37 @@ class CLITests(unittest.TestCase):
             self.assertEqual(ets_summary["method"], "ets")
             self.assertEqual(ets_summary["n_runs"], 2)
             self.assertEqual(FeatureStore.open(ets_output).n_sequences, 2)
+
+            cap_output = Path(temporary) / "cap.store"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                status = main(
+                    [
+                        "build-store",
+                        str(root),
+                        str(cap_output),
+                        "--atlas",
+                        "Example",
+                        "--space",
+                        "MNI152NLin2009cAsym",
+                        "--roi-selection",
+                        str(roi_file),
+                        "--method",
+                        "cap",
+                        "--chunk-size",
+                        "2",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            cap_summary = json.loads(stdout.getvalue())
+            self.assertEqual(cap_summary["method"], "cap")
+            self.assertEqual(cap_summary["n_samples"], 12)
+            cap_store = FeatureStore.open(cap_output)
+            self.assertEqual(cap_store.n_features, 2)
+            self.assertEqual(
+                cap_store.source_contract,
+                "cap:within-segment-roi-zscore-ddof0",
+            )
 
             mtd_output = Path(temporary) / "mtd.store"
             stdout = io.StringIO()
@@ -435,6 +467,48 @@ class CLITests(unittest.TestCase):
                 )
             self.assertEqual(status, 2)
             self.assertIn("overlap", stderr.getvalue())
+
+    @unittest.skipUnless(HAS_STATES_EXTRA, "requires dfc-kit[states]")
+    def test_fit_states_materialized_minibatch_preserves_native_feature_geometry(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = self._write_state_store(root / "features.store")
+            output = root / "materialized.model"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                status = main(
+                    [
+                        "fit-states",
+                        str(store.root),
+                        str(output),
+                        "--method",
+                        "kmeans",
+                        "--n-states",
+                        "2",
+                        "--seed",
+                        "17",
+                        "--n-init",
+                        "4",
+                        "--max-iter",
+                        "30",
+                        "--batch-size",
+                        "16",
+                        "--fitting-mode",
+                        "materialized",
+                        "--algorithm",
+                        "minibatch",
+                        "--no-standardize-features",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            summary = json.loads(stdout.getvalue())
+            self.assertEqual(summary["fitting_mode"], "materialized")
+            self.assertIsNone(summary["init_sample_size"])
+            self.assertEqual(len(summary["training_data_fingerprint"]), 64)
+            restored = load_fitted_model(output)
+            self.assertIsInstance(restored, KMeansStateModel)
+            self.assertFalse(restored.standardize_features)
+            self.assertIn("materialized FeatureStore fit", restored.implementation)
 
     @unittest.skipUnless(HAS_HMM_EXTRA, "requires dfc-kit[hmm]")
     def test_fit_states_hmm_writes_roundtrippable_artifact(self):

@@ -58,7 +58,12 @@ from .io.state_nested_contract import (
     validate_nested_selection,
 )
 from .io.state_nested_lock import acquire_nested_checkpoint_lock
-from .outofcore import fit_minibatch_kmeans_store, predict_kmeans_store, score_kmeans_store
+from .outofcore import (
+    fit_kmeans_store_materialized,
+    fit_minibatch_kmeans_store,
+    predict_kmeans_store,
+    score_kmeans_store,
+)
 from .outofcore_hmm import (
     fit_gaussian_hmm_store,
     predict_gaussian_hmm_store,
@@ -78,7 +83,13 @@ from .states.hmm import GaussianHMMStateModel, GaussianHMMStateResult
 from .states.kmeans import KMeansStateModel
 from .states.metrics import summarize_state_assignments
 from .states.stability import summarize_state_stability
-from .storage import FeatureStore, write_ets_store, write_mtd_store, write_window_fc_store
+from .storage import (
+    FeatureStore,
+    write_cap_store,
+    write_ets_store,
+    write_mtd_store,
+    write_window_fc_store,
+)
 
 
 def _add_xcpd_arguments(parser: argparse.ArgumentParser) -> None:
@@ -226,6 +237,13 @@ def _build_store(namespace: argparse.Namespace) -> dict[str, object]:
             chunk_size=namespace.chunk_size,
             dtype=namespace.dtype,
         )
+    elif namespace.method == "cap":
+        store = write_cap_store(
+            namespace.output,
+            dataset.runs,
+            chunk_size=namespace.chunk_size,
+            dtype=namespace.dtype,
+        )
     elif namespace.method == "ets":
         store = write_ets_store(
             namespace.output,
@@ -272,24 +290,43 @@ def _fit_states(namespace: argparse.Namespace) -> dict[str, object]:
             raise ValueError(f"requested fit subjects are absent from the store: {missing}")
 
     if namespace.method == "kmeans":
-        fit = fit_minibatch_kmeans_store(
-            store,
-            n_states=namespace.n_states,
-            seed=namespace.seed,
-            n_init=10 if namespace.n_init is None else namespace.n_init,
-            max_iter=namespace.max_iter,
-            batch_size=namespace.batch_size,
-            standardize_features=namespace.standardize_features,
-            reassignment_ratio=namespace.reassignment_ratio,
-            init_sample_size=namespace.init_sample_size,
-            subjects=subjects,
-        )
+        if namespace.fitting_mode == "streaming":
+            if namespace.algorithm != "minibatch":
+                raise ValueError("streaming KMeans requires --algorithm minibatch")
+            fit = fit_minibatch_kmeans_store(
+                store,
+                n_states=namespace.n_states,
+                seed=namespace.seed,
+                n_init=10 if namespace.n_init is None else namespace.n_init,
+                max_iter=namespace.max_iter,
+                batch_size=namespace.batch_size,
+                standardize_features=namespace.standardize_features,
+                reassignment_ratio=namespace.reassignment_ratio,
+                init_sample_size=namespace.init_sample_size,
+                subjects=subjects,
+            )
+        else:
+            if namespace.init_sample_size is not None:
+                raise ValueError("materialized KMeans does not use --init-sample-size")
+            fit = fit_kmeans_store_materialized(
+                store,
+                n_states=namespace.n_states,
+                seed=namespace.seed,
+                n_init=10 if namespace.n_init is None else namespace.n_init,
+                max_iter=namespace.max_iter,
+                algorithm=namespace.algorithm,
+                batch_size=namespace.batch_size,
+                standardize_features=namespace.standardize_features,
+                reassignment_ratio=namespace.reassignment_ratio,
+                subjects=subjects,
+            )
         model = fit.model
         fit_sequence_count = len(fit.assignments.sequences)
         artifact = save_fitted_model(model, namespace.output)
         return {
             "model_kind": "kmeans-state",
             "method": namespace.method,
+            "fitting_mode": namespace.fitting_mode,
             "output": str(artifact),
             "fit_subjects": list(model.fit_subjects),
             "fit_sample_count": model.fit_sample_count,
@@ -1971,7 +2008,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_xcpd_arguments(build)
     _add_load_arguments(build)
     build.add_argument("output", type=Path, help="new FeatureStore directory")
-    build.add_argument("--method", choices=("window-fc", "ets", "mtd"), required=True)
+    build.add_argument("--method", choices=("window-fc", "cap", "ets", "mtd"), required=True)
     build.add_argument("--chunk-size", type=int, default=128)
     build.add_argument("--dtype", choices=("float32", "float64"), default="float64")
     build.add_argument("--window-length", type=int, default=56)
@@ -1999,6 +2036,8 @@ def _parser() -> argparse.ArgumentParser:
         help="initializations (default: 10 for KMeans, 1 for HMM)",
     )
     fit.add_argument("--standardize-features", action=argparse.BooleanOptionalAction, default=True)
+    fit.add_argument("--fitting-mode", choices=("streaming", "materialized"), default="streaming")
+    fit.add_argument("--algorithm", choices=("lloyd", "minibatch"), default="minibatch")
     fit.add_argument("--batch-size", type=int, default=4096)
     fit.add_argument("--max-iter", type=int, default=10)
     fit.add_argument("--reassignment-ratio", type=float, default=0.01)

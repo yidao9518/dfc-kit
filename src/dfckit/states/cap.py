@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..connectivity.ets import segment_standardized_samples
 from ..data import TimeSeriesDataset
 from .data import FeatureSequence, FeatureSequenceDataset
 from .kmeans import KMeansFitResult, fit_kmeans_states
@@ -16,17 +17,15 @@ def cap_sequences(dataset: TimeSeriesDataset) -> FeatureSequenceDataset:
     sequences: list[FeatureSequence] = []
     for run in dataset.runs:
         assert run.subject is not None
-        for segment_id, positions in enumerate(run.segments()):
-            if len(positions) < 2:
-                continue
-            values = run.values[positions]
-            scale = values.std(axis=0, ddof=0)
-            scale = np.where(scale < 1e-8, 1.0, scale)
-            standardized = (values - values.mean(axis=0)) / scale
-            original = run.original_indices[positions]
+        standardized, original_indices, segment_ids = segment_standardized_samples(
+            run, method_name="CAP"
+        )
+        for segment_id in dict.fromkeys(segment_ids.tolist()):
+            positions = np.flatnonzero(segment_ids == segment_id)
+            original = original_indices[positions]
             sequences.append(
                 FeatureSequence(
-                    values=standardized,
+                    values=standardized[positions],
                     sample_start_indices=original,
                     sample_end_indices=original,
                     feature_keys=feature_keys,

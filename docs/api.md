@@ -151,9 +151,11 @@ and correction scope. NBS remains explicitly experimental.
 ```python
 from dfckit.storage import (
     FeatureStore,
+    append_cap,
     append_ets,
     append_mtd,
     append_window_fc,
+    write_cap_store,
     write_ets_store,
     write_mtd_store,
     write_window_fc_store,
@@ -163,10 +165,29 @@ from dfckit.storage import (
 The store keeps feature identity, source contract, sample interval, and
 subject/session/acquisition/segment boundaries alongside memory-mappable row chunks.
 
+CAP storage is a separate feature geometry from FC storage:
+
+```python
+cap_store = write_cap_store(
+    "/path/to/cap.store",
+    runs,
+    chunk_size=256,
+)
+append_cap(cap_store, another_run, chunk_size=256)
+```
+
+The CAP writer stores one ROI feature per row sample, standardizes each ROI
+within each uninterrupted retained segment using `ddof=0`, and preserves the
+original frame indices. Its source contract is
+`cap:within-segment-roi-zscore-ddof0`; it does not create connectivity edges.
+Each segment is a separate sequence, so later occupancy, dwell, and transition
+metrics remain gap-safe. Segments shorter than two retained frames are omitted.
+
 For state fitting without reconstructing all rows in memory:
 
 ```python
 from dfckit.outofcore import (
+    fit_kmeans_store_materialized,
     fit_minibatch_kmeans_store,
     predict_kmeans_store,
     score_kmeans_store,
@@ -186,6 +207,29 @@ The streaming fitter keeps the training scaler, centres, and participant
 identities in the same `KMeansStateModel` contract as the in-memory fitter.
 Prediction emits state labels and original sample indices only; participant
 overlap is rejected unless explicitly allowed.
+
+For a historical in-memory KMeans contract, use the materialized adapter:
+
+```python
+fit = fit_kmeans_store_materialized(
+    FeatureStore.open("/path/to/cap.store"),
+    subjects=("sub-001", "sub-002"),
+    n_states=5,
+    seed=20260818,
+    n_init=20,
+    max_iter=300,
+    algorithm="minibatch",
+    standardize_features=False,
+)
+```
+
+Materialized fitting reconstructs the selected store cohort in memory and
+calls one complete scikit-learn `KMeans.fit` (`algorithm="lloyd"`) or
+`MiniBatchKMeans.fit` (`algorithm="minibatch"`). It preserves source/feature
+contracts and the selected-cohort fingerprint but has no bounded-memory
+guarantee. For CAP stores, `standardize_features=False` preserves the
+segment-level ROI z-scoring already encoded in the store; enabling it performs
+an additional pooled scaling pass.
 
 For reduced sequence models, use the streaming PCA and HMM entry points:
 

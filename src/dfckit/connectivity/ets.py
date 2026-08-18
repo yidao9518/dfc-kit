@@ -68,6 +68,8 @@ class ETSEventThreshold:
 
 def segment_standardized_samples(
     run: TimeSeriesRun,
+    *,
+    method_name: str = "ETS",
 ) -> tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.int64]]:
     samples: list[NDArray[np.float64]] = []
     original_indices: list[NDArray[np.int64]] = []
@@ -84,10 +86,10 @@ def segment_standardized_samples(
         segment_ids.append(np.full(len(positions), segment_id, dtype=np.int64))
 
     if not samples:
-        raise ValueError("ETS requires at least one retained segment with two frames")
+        raise ValueError(f"{method_name} requires at least one retained segment with two frames")
     standardized = np.concatenate(samples, axis=0)
     if not np.isfinite(standardized).all():
-        raise ValueError("standardized ETS samples contain non-finite values")
+        raise ValueError(f"standardized {method_name} samples contain non-finite values")
     return (
         _readonly(standardized),
         _readonly(np.concatenate(original_indices)),

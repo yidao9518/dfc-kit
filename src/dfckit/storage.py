@@ -668,6 +668,10 @@ def _edge_feature_keys(roi_names: Sequence[str]) -> tuple[FeatureKey, ...]:
     )
 
 
+def _roi_feature_keys(roi_names: Sequence[str]) -> tuple[FeatureKey, ...]:
+    return tuple((str(name),) for name in roi_names)
+
+
 def _window_fc_contract(estimator: SlidingWindowFC) -> str:
     return f"window-fc:length={estimator.length};step={estimator.step};taper={estimator.taper}"
 
@@ -814,6 +818,68 @@ def write_mtd_store(
     )
     for run in dataset.runs:
         append_mtd(store, run, chunk_size=chunk_size)
+    return store
+
+
+def append_cap(
+    store: FeatureStore,
+    run: TimeSeriesRun,
+    *,
+    chunk_size: int = 128,
+) -> None:
+    """Append segment-standardized instantaneous ROI patterns in bounded chunks."""
+    if run.subject is None:
+        raise ValueError("stored CAP requires a subject identifier")
+    size = _validated_chunk_size(chunk_size)
+    keys = _roi_feature_keys(run.roi_names)
+    contract = "cap:within-segment-roi-zscore-ddof0"
+    store.require_contract(
+        feature_keys=keys,
+        source_contract=contract,
+        sample_interval_seconds=run.tr,
+    )
+    standardized, original, segment_ids = segment_standardized_samples(
+        run, method_name="CAP"
+    )
+    for segment_id in dict.fromkeys(segment_ids.tolist()):
+        positions = np.flatnonzero(segment_ids == segment_id)
+
+        def parts(
+            segment_positions: NDArray[np.int64] = positions,
+        ) -> Iterator[tuple[NDArray, NDArray, NDArray]]:
+            for first in range(0, len(segment_positions), size):
+                selected = segment_positions[first : first + size]
+                indices = original[selected]
+                yield standardized[selected], indices, indices
+
+        store.append_sequence_parts(
+            parts(),
+            subject=run.subject,
+            session=run.session,
+            segment_id=int(segment_id),
+            acquisition_id=run.acquisition_id,
+        )
+
+
+def write_cap_store(
+    root: str | Path,
+    runs: Sequence[TimeSeriesRun],
+    *,
+    chunk_size: int = 128,
+    dtype: str | np.dtype = "float64",
+) -> FeatureStore:
+    """Create a store of segment-standardized instantaneous ROI patterns."""
+    dataset = TimeSeriesDataset(runs)
+    dataset.require_subject_ids("stored CAP")
+    store = FeatureStore.create(
+        root,
+        feature_keys=_roi_feature_keys(dataset.roi_names),
+        source_contract="cap:within-segment-roi-zscore-ddof0",
+        sample_interval_seconds=dataset.tr,
+        dtype=dtype,
+    )
+    for run in dataset.runs:
+        append_cap(store, run, chunk_size=chunk_size)
     return store
 
 

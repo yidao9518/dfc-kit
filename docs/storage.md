@@ -69,6 +69,35 @@ The source contract is
 `mtd:difference=within-segment;normalization=run`; it is therefore distinct
 from the segment-normalized ETS contract.
 
+## Stream CAP
+
+CAP stores contain instantaneous ROI patterns, not ROI-pair edges. The writer
+standardizes every ROI over the complete uninterrupted retained segment with
+population standard deviation (`ddof=0`) and then writes the resulting rows in
+bounded chunks:
+
+```python
+from dfckit.storage import append_cap, write_cap_store
+
+store = write_cap_store(
+    "/path/to/cap.store",
+    runs,
+    chunk_size=256,
+)
+
+# Append another acquisition to an existing CAP store with the same contract.
+append_cap(store, another_run, chunk_size=256)
+```
+
+Each retained segment becomes its own FeatureStore sequence. Segments shorter
+than two retained frames are omitted, because a segment-level standardized CAP
+sequence cannot provide a usable temporal sample. Every stored row retains the
+original frame index in both `sample_start_indices` and `sample_end_indices`,
+and censor gaps therefore cannot be joined during later state metrics. The
+source contract is `cap:within-segment-roi-zscore-ddof0`, and the feature keys
+are the ROI names in their input order. Standardization is performed before
+chunking, so changing `chunk_size` does not change CAP values.
+
 ## Read and append
 
 ```python
@@ -125,6 +154,50 @@ The returned `KMeansFitResult` is the same result type as the in-memory state
 API. Its assignments contain only labels and original sample indices. The
 feature store itself remains memory-mapped, and prediction rejects any subject
 used for fitting by default.
+
+## Materialized KMeans fitting
+
+For moderate stores, `fit_kmeans_store_materialized` reconstructs the selected
+rows as a `FeatureSequenceDataset` and delegates to the in-memory
+`fit_kmeans_states` implementation. This is the appropriate path when a
+historical analysis used one complete scikit-learn `.fit` call and exact native
+feature geometry matters:
+
+```python
+from dfckit.outofcore import fit_kmeans_store_materialized
+
+fit = fit_kmeans_store_materialized(
+    FeatureStore.open("/path/to/cap.store"),
+    subjects=("sub-001", "sub-002"),
+    n_states=5,
+    seed=20260818,
+    n_init=20,
+    max_iter=300,
+    algorithm="minibatch",
+    standardize_features=False,
+)
+```
+
+Materialized fitting loads the selected cohort into memory; it is not an
+out-of-core operation. `algorithm="lloyd"` calls scikit-learn `KMeans.fit`,
+whereas `algorithm="minibatch"` calls `MiniBatchKMeans.fit`. Both retain the
+FeatureStore source contract, feature identities, selected fit subjects, and
+training-data fingerprint in the returned model. CAP rows have already been
+standardized within segment, so CAP reproduction normally uses
+`standardize_features=False`; enabling it adds a second pooled feature
+standardization and changes the fitted geometry.
+
+The two KMeans paths have distinct numerical and memory semantics:
+
+| Mode | Algorithm | Feature rows in RAM | Estimator operation | Typical use |
+| --- | --- | --- | --- | --- |
+| `streaming` | `minibatch` only | bounded chunks | repeated `partial_fit` passes | large stores |
+| `materialized` | `lloyd` | selected cohort | one `KMeans.fit` call | historical Lloyd fits |
+| `materialized` | `minibatch` | selected cohort | one `MiniBatchKMeans.fit` call | historical CAP/MiniBatch fits |
+
+The streaming path is not a hidden alias for `MiniBatchKMeans.fit`: its
+initialization sample, chunk traversal, and repeated `partial_fit` updates are
+recorded separately in the model implementation and provenance.
 
 ## Stream PCA and Gaussian HMM
 
