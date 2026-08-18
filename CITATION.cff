@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use dfc-kit, cite this software and the original papers for the methods you apply."
+title: "dfc-kit: Censor-aware dynamic functional connectivity tools"
+type: software
+authors:
+  - name: "dfc-kit contributors"
+version: 0.24.0
+date-released: 2026-08-18
+license: BSD-3-Clause

@@ -1,0 +1,12 @@
+include CHANGELOG.md
+include CITATION.cff
+include CONTRIBUTING.md
+include ENGINEERING_PLAN.md
+include LICENSE
+include README.md
+include ROADMAP.md
+include SECURITY.md
+include mkdocs.yml
+recursive-include benchmarks *.md *.py
+recursive-include docs *.md
+recursive-include tests *.json *.py

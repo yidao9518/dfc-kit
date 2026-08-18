@@ -1,0 +1,48 @@
+site_name: dfc-kit
+site_description: Censor-aware dynamic functional connectivity tools for XCP-D derivatives
+docs_dir: docs
+site_dir: site
+theme:
+  name: readthedocs
+nav:
+  - Home: index.md
+  - Getting started: getting_started.md
+  - Input and data:
+      - XCP-D input: xcpd_input.md
+      - Datasets: datasets.md
+      - Chunked feature storage: storage.md
+      - Command-line workflows: cli.md
+      - Fitted model artifacts: model_artifacts.md
+      - Architecture: architecture.md
+  - Connectivity methods:
+      - Correlation and sliding-window FC: correlation.md
+      - MTD: mtd.md
+      - ETS: ets.md
+      - LEiDA: leida.md
+      - Low-rank covariance: lowrank.md
+      - Information: information.md
+  - Network and state methods:
+      - Partition graphs: partition_graphs.md
+      - State models: states.md
+      - State alignment: state_alignment.md
+      - Repeated-fit stability: state_stability.md
+      - Held-out model scoring: state_scoring.md
+      - State-count selection: state_selection.md
+      - Nested state-count validation: nested_cross_validation.md
+      - Gaussian HMM: hmm.md
+      - Healthy references: reference.md
+  - Inference and QC:
+      - Paired inference: inference.md
+      - Experimental NBS: nbs.md
+      - Motion matching: qc_matching.md
+  - Tutorials:
+      - XCP-D to states: tutorial_xcpd_to_states.md
+  - API map: api.md
+  - Method inventory: method_inventory.md
+  - Release process: release.md
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+strict: true
