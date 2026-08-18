@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Profile one synthetic dfc-kit transform in an isolated process."""
 
 from __future__ import annotations
