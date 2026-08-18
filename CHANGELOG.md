@@ -34,6 +34,8 @@ All notable changes to this project are documented here. The format follows
   the unused NetworkX installation extra has been removed.
 - Release metadata now links to the public repository and issue tracker; CI
   covers Python 3.10, 3.12, and 3.13 and smoke-tests the built wheel.
+- CI uses the current Node 24 GitHub actions and invokes Ruff through the
+  selected Python matrix interpreter.
 
 ## [0.23.0] - 2026-08-18
 
