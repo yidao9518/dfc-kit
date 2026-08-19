@@ -99,9 +99,11 @@ validation. Start with:
 dfc-kit --help
 dfc-kit inspect-xcpd --help
 dfc-kit build-store --help
+dfc-kit fixed-information --help
 ```
 
-See [Command-line workflows](docs/cli.md) for complete examples and arguments.
+See [Command-line workflows](docs/cli.md) for complete examples and arguments,
+including fixed-length MI/CMI artifacts and frozen-window replay.
 
 ## Documentation
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
@@ -454,6 +455,7 @@ class FixedLengthInformation:
         jitter: float = 1e-10,
         jitter_seed: int = DEFAULT_JITTER_SEED,
         standardize: bool = True,
+        jobs: int = 1,
     ) -> None:
         self.length = _validated_integer(length, label="length", minimum=1)
         self.draws = _validated_integer(draws, label="draws", minimum=1)
@@ -465,6 +467,7 @@ class FixedLengthInformation:
         self.jitter = _validated_jitter(jitter)
         self.jitter_seed = _validated_seed(jitter_seed, label="jitter_seed")
         self.standardize = bool(standardize)
+        self.jobs = _validated_integer(jobs, label="jobs", minimum=1)
 
     def transform(
         self,
@@ -474,26 +477,34 @@ class FixedLengthInformation:
         *,
         conditioning: Iterable[int] | None = None,
     ) -> FixedLengthInformationResult:
+        left_nodes = tuple(left)
+        right_nodes = tuple(right)
+        condition_nodes = None if conditioning is None else tuple(conditioning)
         samples = sample_fixed_windows(
             run,
             self.length,
             self.draws,
             seed=self.sample_seed,
         )
-        estimates = [
-            block_information(
+
+        def estimate(window: NDArray[np.float64]) -> BlockInformationResult:
+            return block_information(
                 window,
-                left,
-                right,
-                conditioning=conditioning,
+                left_nodes,
+                right_nodes,
+                conditioning=condition_nodes,
                 standardize=self.standardize,
                 k=self.k,
                 metric=self.metric,
                 jitter=self.jitter,
                 seed=self.jitter_seed,
             )
-            for window in samples.values
-        ]
+
+        if self.jobs == 1:
+            estimates = [estimate(window) for window in samples.values]
+        else:
+            with ThreadPoolExecutor(max_workers=self.jobs) as executor:
+                estimates = list(executor.map(estimate, samples.values))
         first = estimates[0]
         mi = np.stack([estimate.mutual_information for estimate in estimates])
         cmi = (

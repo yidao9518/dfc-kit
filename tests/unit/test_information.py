@@ -135,6 +135,36 @@ class InformationKernelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             result.mutual_information[0, 0, 0] = 0.0
 
+    def test_parallel_transform_materializes_group_iterables_once(self):
+        rng = np.random.default_rng(53)
+        driver = rng.normal(size=140)
+        values = np.column_stack(
+            (
+                driver + rng.normal(scale=0.2, size=140),
+                driver + rng.normal(scale=0.3, size=140),
+                driver + rng.normal(scale=0.2, size=140),
+                driver,
+            )
+        )
+        run = TimeSeriesRun(
+            values=values,
+            original_indices=np.arange(140),
+            roi_names=("left-a", "left-b", "right", "condition"),
+        )
+        result = FixedLengthInformation(
+            length=60,
+            draws=4,
+            sample_seed=17,
+            jobs=2,
+        ).transform(
+            run,
+            (node for node in (0, 1)),
+            (node for node in (2,)),
+            conditioning=(node for node in (3,)),
+        )
+        self.assertEqual(result.mutual_information.shape, (4, 2, 1))
+        self.assertEqual(result.conditional_mutual_information.shape, (4, 2, 1))
+
     def test_invalid_blocks_metric_and_short_series_are_rejected(self):
         values = np.arange(40, dtype=float).reshape(10, 4)
         with self.assertRaisesRegex(ValueError, "disjoint"):

@@ -34,6 +34,8 @@ sampling seed.
   ties. Set `jitter=0` only when ties are known to be absent.
 - Each ROI column is independently centered and divided by its population SD by
   default. Constant columns are rejected.
+- `jobs` may parallelize independent draw-level estimates; executor order is
+  preserved, so it does not change the seeded windows or artifact row order.
 - When several conditioning ROI indices are supplied, their standardized time
   series are averaged into one scalar conditioning signal.
 - Finite-sample kNN estimates may be slightly negative and are not clipped.
@@ -64,3 +66,60 @@ print(result.samples.start_frames)
 `block_information` exposes the same pairwise and block-mean calculation for a
 single frames-by-ROI array. `knn_mi` and `knn_cmi` expose the scalar numerical
 kernels for advanced use.
+
+## Batch artifact workflow
+
+The artifact layer is independent of any atlas or clinical vocabulary. Put the
+ROI names into a separate JSON file with exactly these fields:
+
+```json
+{
+  "left": ["ROI_01", "ROI_02"],
+  "right": ["ROI_11", "ROI_12"],
+  "conditioning": ["ROI_21"]
+}
+```
+
+`conditioning` may be `null` for an MI-only analysis. All named groups must be
+non-empty (except `conditioning`) and disjoint. Names are resolved against the
+ordered ROI axis loaded from XCP-D, so no atlas-specific indices are hidden in
+this file.
+
+The command accepts one or more lengths and runs every selected acquisition,
+subject, and session:
+
+```bash
+dfc-kit fixed-information /path/to/xcp_d results/fixed-information \
+  --atlas Schaefer200 \
+  --space MNI152NLin2009cAsym \
+  --task rest \
+  --roi-selection rois.json \
+  --information-groups information-groups.json \
+  --length 120 --length 180 \
+  --draws 20 --sample-seed 20260819 --jobs 1
+```
+
+The output is a new directory containing exactly `manifest.json`,
+`arrays.npz`, `draw_metrics.tsv`, and `session_metrics.tsv`. The manifest
+records the ordered ROI groups, estimator settings, acquisition identities,
+requested length grid, actual analyzable acquisition-by-length cells, and
+sampling mode. A length with no eligible retained window is omitted for that
+acquisition; each retained cell still contains every draw from zero through
+`draws - 1`. The numeric arrays contain pairwise MI/CMI for
+every draw; both TSV files repeat row-level identities and block means for
+inspection. `load_fixed_information` verifies that arrays, manifest, and TSV
+files agree before returning a result.
+
+For exact replay, provide a frozen schedule with this exact header:
+
+```text
+acquisition_id\tlength\tdraw\tstart_frame\tend_frame
+```
+
+`start_frame` and `end_frame` are original, pre-censor frame indices. A schedule
+may omit an entire acquisition-by-length cell. Every cell that is present must
+contain all requested draws numbered from zero; a single missing draw is an
+error. Unknown acquisitions and unrequested lengths are also rejected. Each
+interval must be contiguous and wholly retained in one XCP-D segment. The
+schedule is stable across changes in how segments are numbered; the loader
+derives segment identity from the current retained frame axis.

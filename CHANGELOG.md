@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-08-19
+
+### Added
+
+- A standalone fixed-length MI/CMI workflow for one or more XCP-D
+  acquisitions, with named ROI groups loaded from independent JSON.
+- Multiple exact retained-frame lengths, seeded sampling, and frozen-window
+  replay from original-frame TSV schedules, including explicit omission of
+  acquisition-length cells with no eligible contiguous interval.
+- Atomic, pickle-free information artifacts containing a strict manifest,
+  numeric arrays, per-draw metrics, and per-acquisition summaries. The loader
+  cross-validates all four files before returning an immutable result.
+- `dfc-kit fixed-information` for batch XCP-D execution and machine-readable
+  JSON summaries.
+
 ## [0.27.0] - 2026-08-19
 
 ### Added

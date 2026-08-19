@@ -16,10 +16,13 @@ from .data import TimeSeriesDataset
 from .io import (
     StatePredictions,
     compare_state_model_scores,
+    compute_fixed_information,
     discover_xcpd_runs,
     fitted_model_fingerprint,
     inspect_nested_state_count_progress,
     load_fitted_model,
+    load_fixed_window_schedule,
+    load_information_groups,
     load_nested_state_count_cross_validation,
     load_selected_state_count_evaluation,
     load_state_count_cross_validation,
@@ -28,6 +31,7 @@ from .io import (
     load_xcpd_dataset,
     nested_state_count_progress_payload,
     save_fitted_model,
+    save_fixed_information,
     save_state_alignment,
     save_state_predictions,
     state_model_specification,
@@ -278,6 +282,66 @@ def _build_store(namespace: argparse.Namespace) -> dict[str, object]:
         "n_chunks": store.n_chunks,
         "n_features": store.n_features,
         "format_version": store.format_version,
+    }
+
+
+def _fixed_information(namespace: argparse.Namespace) -> dict[str, object]:
+    if namespace.jobs < 1:
+        raise ValueError("--jobs must be at least 1")
+    selection = _load_roi_selection(namespace.roi_selection)
+    datasets = tuple(
+        load_xcpd_dataset(
+            namespace.root,
+            roi_names=selection,
+            minimum_coverage=namespace.minimum_coverage,
+            tr=namespace.tr,
+            **_filters(namespace, subject=subject),
+        )
+        for subject in _selected_xcpd_subjects(namespace)
+    )
+    dataset = TimeSeriesDataset(tuple(run for item in datasets for run in item.runs))
+    groups = load_information_groups(namespace.information_groups)
+    schedule = (
+        None
+        if namespace.window_schedule is None
+        else load_fixed_window_schedule(namespace.window_schedule)
+    )
+    artifact = compute_fixed_information(
+        dataset,
+        groups,
+        lengths=namespace.length,
+        draws=namespace.draws,
+        sample_seed=namespace.sample_seed,
+        schedule=schedule,
+        schedule_source=(
+            None if namespace.window_schedule is None else str(namespace.window_schedule)
+        ),
+        k=namespace.k,
+        jitter=namespace.jitter,
+        jitter_seed=namespace.jitter_seed,
+        standardize=namespace.standardize,
+        jobs=namespace.jobs,
+    )
+    output = save_fixed_information(artifact, namespace.output)
+    return {
+        "acquisition_ids": [item.acquisition_id for item in artifact.acquisitions],
+        "conditioning_rois": (
+            [] if artifact.groups.conditioning is None else list(artifact.groups.conditioning)
+        ),
+        "draws_per_length": artifact.draws_per_length,
+        "format_version": artifact.format_version,
+        "has_cmi": artifact.has_cmi,
+        "left_rois": list(artifact.groups.left),
+        "lengths": list(artifact.lengths),
+        "method": "fixed-information",
+        "n_draws": artifact.n_draws,
+        "n_runs": len(artifact.acquisitions),
+        "n_cells": artifact.n_cells,
+        "jobs": namespace.jobs,
+        "output": str(output),
+        "right_rois": list(artifact.groups.right),
+        "schedule_mode": artifact.schedule_mode,
+        "subjects": list(dataset.subjects),
     }
 
 
@@ -2029,6 +2093,53 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--taper", choices=("hamming", "uniform"), default="hamming")
     build.add_argument("--minimum-segment-length", type=int, default=20)
 
+    information = subparsers.add_parser(
+        "fixed-information",
+        help="estimate fixed-length block MI/CMI from XCP-D acquisitions",
+    )
+    _add_xcpd_arguments(information)
+    _add_load_arguments(information)
+    information.add_argument(
+        "output",
+        type=Path,
+        help="new fixed-information artifact directory",
+    )
+    information.add_argument(
+        "--information-groups",
+        type=Path,
+        required=True,
+        help="standalone JSON declaring named left, right, and conditioning ROI groups",
+    )
+    information.add_argument(
+        "--length",
+        action="append",
+        type=int,
+        required=True,
+        help="fixed retained-frame length; repeat for a sensitivity set",
+    )
+    information.add_argument("--draws", type=int, required=True)
+    information.add_argument("--sample-seed", type=int, required=True)
+    information.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="validated execution parallelism (default: 1)",
+    )
+    information.add_argument(
+        "--window-schedule",
+        type=Path,
+        help="optional strict TSV freezing acquisition, length, draw, and original frame bounds",
+    )
+    information.add_argument("--k", type=int, default=3)
+    information.add_argument("--jitter", type=float, default=1e-10)
+    information.add_argument("--jitter-seed", type=int, default=20260811)
+    information.add_argument(
+        "--standardize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="z-score each ROI within each fixed window (default: enabled)",
+    )
+
     fit = subparsers.add_parser(
         "fit-states",
         help="fit a portable KMeans or Gaussian HMM model from a FeatureStore",
@@ -2351,6 +2462,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = _inspect(namespace)
         elif namespace.command == "build-store":
             result = _build_store(namespace)
+        elif namespace.command == "fixed-information":
+            result = _fixed_information(namespace)
         elif namespace.command == "fit-states":
             result = _fit_states(namespace)
         elif namespace.command == "predict-states":

@@ -1,8 +1,8 @@
 # Command-line workflows
 
-The `dfc-kit` command connects the supported XCP-D input boundary to the
-bounded-memory FeatureStore writers. It does not perform fMRIPrep or XCP-D
-preprocessing.
+The `dfc-kit` command connects the supported XCP-D input boundary to
+bounded-memory FeatureStores, fixed-information artifacts, and state-analysis
+workflows. It does not perform fMRIPrep or XCP-D preprocessing.
 
 ## Inspect acquisitions
 
@@ -124,6 +124,45 @@ dfc-kit build-store /path/to/xcp_d /path/to/features/leida.store \
 The source contract records the minimum segment length and the positive-vector-sum
 orientation. LEiDA stores contain one leading eigenvector value per selected ROI;
 they are state-model features, not phase-block summary metrics.
+
+## Fixed-length MI/CMI
+
+Use `fixed-information` when estimates must use exactly the same temporal
+length. The command reuses the package's Kraskov MI and Frenzel-Pompe CMI
+kernels; it does not infer direction or causality. Repeat `--length` for a
+predefined length-sensitivity set. `--draws` and `--sample-seed` define the
+uniform-with-replacement window sample independently for every acquisition and
+length:
+
+```bash
+dfc-kit fixed-information /path/to/xcp_d results/fixed-information \
+  --atlas Schaefer200 \
+  --space MNI152NLin2009cAsym \
+  --task rest \
+  --roi-selection rois.json \
+  --information-groups information-groups.json \
+  --length 120 --length 180 \
+  --draws 20 --sample-seed 20260819
+```
+
+`information-groups.json` must contain only `left`, `right`, and
+`conditioning` arrays (the latter may be `null`). The command prints a JSON
+summary after writing the new artifact directory. `--subject` can be repeated
+to process multiple participants, and `--session`, `--task`, and `--space`
+remain ordinary XCP-D filters. `--jobs` parallelizes independent draw-level
+estimates while preserving seeded window and output row order.
+
+Some acquisitions may not have a retained segment long enough for every
+requested length. Such acquisition-length cells are omitted and reported in
+the manifest; a selected acquisition must still have at least one analyzable
+cell.
+
+To replay exact windows from another run, pass `--window-schedule` with a TSV
+whose header is `acquisition_id`, `length`, `draw`, `start_frame`, and
+`end_frame`. Frame coordinates are on the original, pre-censor axis. The
+schedule may omit complete acquisition-length cells, but every included cell
+must contain every requested draw. A partial cell, duplicate, unknown entity,
+non-contiguous interval, or censored interval is rejected.
 
 ## Fit a state model
 

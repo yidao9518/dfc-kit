@@ -13,7 +13,7 @@ implementations.
 | ETS | `dfckit.connectivity.ETS` | [ETS](ets.md) |
 | LEiDA and phase summaries | `dfckit.connectivity.LEiDA` | [LEiDA](leida.md) |
 | Low-rank covariance geometry | `dfckit.connectivity.LowRankCovariance` | [Low-rank covariance](lowrank.md) |
-| Fixed-length MI/CMI | `dfckit.connectivity.FixedLengthInformation` | [Information](information.md) |
+| Fixed-length MI/CMI | `dfckit.connectivity.FixedLengthInformation`, `dfckit.io.information` | [Information](information.md) |
 | Partition and graph metrics | `dfckit.networks` | [Partition graphs](partition_graphs.md) |
 | CAP, KMeans, and Gaussian HMM states | `dfckit.states` | [State models](states.md) |
 | State alignment and repeated-fit stability | `dfckit.states.alignment`, `dfckit.states.stability` | [State alignment](state_alignment.md), [stability](state_stability.md) |

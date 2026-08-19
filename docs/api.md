@@ -21,6 +21,13 @@ from dfckit.io import (
     load_xcpd_dataset,
     load_xcpd_run,
 )
+
+from dfckit.io import (
+    InformationGroups,
+    compute_fixed_information,
+    load_fixed_information,
+    save_fixed_information,
+)
 ```
 
 The loader validates atlas identity, coverage, outlier masks, and whether each
@@ -28,6 +35,26 @@ time-series table represents the full or already-censored axis.
 
 For a shell entry point that wraps batch discovery and FeatureStore writers,
 see [Command-line workflows](cli.md).
+
+Fixed-length information workflows use a separate named-group JSON and return
+an atomic artifact that can be loaded without pickle:
+
+```python
+groups = InformationGroups(
+    left=("left-1", "left-2"),
+    right=("right-1",),
+    conditioning=("condition",),
+)
+artifact = compute_fixed_information(
+    dataset,
+    groups,
+    lengths=(120, 180),
+    draws=20,
+    sample_seed=20260819,
+)
+save_fixed_information(artifact, "results/fixed-information")
+restored = load_fixed_information("results/fixed-information")
+```
 
 ## Fitted model artifacts
 
