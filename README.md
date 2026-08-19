@@ -29,7 +29,8 @@ cohorts.
   Gaussian HMMs, state alignment, occupancy/dwell/transition summaries, and
   subject-disjoint state-count validation.
 - **Inference and QC:** paired sign-flips, bootstrap intervals, HC3 models,
-  FDR, experimental paired NBS, and within-subject motion matching.
+  declared-family FDR, generic paired endpoint inference, experimental paired
+  NBS, and within-subject motion matching.
 - **Scalable and portable outputs:** append-only memory-mapped FeatureStores,
   bounded-memory fitting, pickle-free model artifacts, held-out prediction
   records, and provenance fingerprints.
@@ -100,6 +101,12 @@ dfc-kit --help
 dfc-kit inspect-xcpd --help
 dfc-kit build-store --help
 dfc-kit fixed-information --help
+dfc-kit describe-states --help
+dfc-kit infer-state-metrics --help
+dfc-kit summarize-store --help
+dfc-kit summarize-information --help
+dfc-kit infer-paired-endpoints --help
+dfc-kit adjust-result-families --help
 ```
 
 See [Command-line workflows](docs/cli.md) for complete examples and arguments,

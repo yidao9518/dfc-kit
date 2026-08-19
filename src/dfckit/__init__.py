@@ -32,4 +32,4 @@ __all__ = [
     "subject_balanced_quantiles",
     "validate_subject_disjoint",
 ]
-__version__ = "0.28.0"
+__version__ = "0.29.0"

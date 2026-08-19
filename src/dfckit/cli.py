@@ -13,6 +13,15 @@ from pathlib import Path
 
 from .connectivity import LEiDA, SlidingWindowFC
 from .data import TimeSeriesDataset
+from .inference import (
+    adjust_result_families_file,
+    infer_paired_endpoints_file,
+    infer_paired_state_metrics_file,
+    write_adjusted_result_families,
+    write_paired_endpoint_inference,
+    write_paired_state_inference,
+)
+from .information_summary import summarize_information_artifact, write_information_summary
 from .io import (
     StatePredictions,
     compare_state_model_scores,
@@ -73,6 +82,10 @@ from .outofcore_hmm import (
     predict_gaussian_hmm_store,
     score_gaussian_hmm_store,
 )
+from .state_interpretation import (
+    describe_kmeans_state_artifacts,
+    write_state_description,
+)
 from .states.alignment import (
     align_gaussian_hmm_emissions,
     align_kmeans_centroids,
@@ -95,6 +108,7 @@ from .storage import (
     write_mtd_store,
     write_window_fc_store,
 )
+from .store_summary import summarize_store_file, write_store_summary
 
 
 def _add_xcpd_arguments(parser: argparse.ArgumentParser) -> None:
@@ -587,6 +601,109 @@ def _score_states(namespace: argparse.Namespace) -> dict[str, object]:
         "omitted_short_sequence_count": omitted_short_sequence_count,
         "evaluation_data_fingerprint": evaluation_fingerprint,
         "allow_fit_subjects": bool(namespace.allow_fit_subjects),
+    }
+
+
+def _describe_states(namespace: argparse.Namespace) -> dict[str, object]:
+    payload = describe_kmeans_state_artifacts(
+        namespace.store,
+        namespace.model,
+        top_features=namespace.top_features,
+        network_map_path=namespace.network_map,
+    )
+    output = write_state_description(payload, namespace.output)
+    return {
+        "output": str(output),
+        "model_kind": payload["model_kind"],
+        "feature_type": payload["feature_type"],
+        "n_states": payload["n_states"],
+        "n_features": payload["n_features"],
+        "network_map_applied": payload["network_map_applied"],
+    }
+
+
+def _infer_state_metrics(namespace: argparse.Namespace) -> dict[str, object]:
+    payload = infer_paired_state_metrics_file(
+        namespace.metrics,
+        condition_a=namespace.condition_a,
+        condition_b=namespace.condition_b,
+        metrics=tuple(namespace.metric),
+        fdr_family=namespace.fdr_family,
+        alpha=namespace.alpha,
+        n_permutations=namespace.permutations,
+        n_bootstrap=namespace.bootstrap,
+        seed=namespace.seed,
+        exact=namespace.exact,
+    )
+    output = write_paired_state_inference(payload, namespace.output)
+    counts = {
+        status: sum(result["result_status"] == status for result in payload["results"])
+        for status in ("positive", "negative", "not_testable")
+    }
+    return {
+        "output": str(output),
+        "contrast": payload["contrast"],
+        "fdr_family": payload["fdr_family"],
+        "n_endpoints": payload["n_endpoints"],
+        "n_tested": payload["n_tested"],
+        "status_counts": counts,
+    }
+
+
+def _adjust_result_families(namespace: argparse.Namespace) -> dict[str, object]:
+    payload = adjust_result_families_file(namespace.input, alpha=namespace.alpha)
+    output = write_adjusted_result_families(payload, namespace.output)
+    return {
+        "output": str(output),
+        "method": payload["method"],
+        "alpha": payload["alpha"],
+        "families": payload["families"],
+        "n_results": len(payload["results"]),
+    }
+
+
+def _summarize_store(namespace: argparse.Namespace) -> dict[str, object]:
+    payload = summarize_store_file(namespace.store)
+    output = write_store_summary(payload, namespace.output)
+    return {
+        "output": str(output),
+        "source_contract": payload["source_contract"],
+        "feature_type": payload["feature_type"],
+        "n_features": payload["n_features"],
+        "n_acquisitions": payload["n_acquisitions"],
+    }
+
+
+def _infer_endpoints(namespace: argparse.Namespace) -> dict[str, object]:
+    payload = infer_paired_endpoints_file(
+        namespace.endpoints,
+        condition_a=namespace.condition_a,
+        condition_b=namespace.condition_b,
+        fdr_family=namespace.fdr_family,
+        alpha=namespace.alpha,
+        n_permutations=namespace.permutations,
+        n_bootstrap=namespace.bootstrap,
+        seed=namespace.seed,
+        exact=namespace.exact,
+    )
+    output = write_paired_endpoint_inference(payload, namespace.output)
+    return {
+        "output": str(output),
+        "contrast": payload["contrast"],
+        "fdr_family": payload["fdr_family"],
+        "n_endpoints": payload["n_endpoints"],
+        "n_tested": payload["n_tested"],
+    }
+
+
+def _summarize_information(namespace: argparse.Namespace) -> dict[str, object]:
+    payload = summarize_information_artifact(namespace.artifact)
+    output = write_information_summary(payload, namespace.output)
+    return {
+        "output": str(output),
+        "lengths": payload["lengths"],
+        "groups": payload["groups"],
+        "n_endpoints": len(payload["rows"]),
     }
 
 
@@ -2199,6 +2316,83 @@ def _parser() -> argparse.ArgumentParser:
     summarize.add_argument("predictions", type=Path, help="state-prediction artifact directory")
     summarize.add_argument("output", type=Path, help="new state-metrics JSON file")
 
+    summarize_features = subparsers.add_parser(
+        "summarize-store",
+        help="write acquisition-level means for every named FeatureStore feature",
+    )
+    summarize_features.add_argument("store", type=Path, help="FeatureStore to summarize")
+    summarize_features.add_argument("output", type=Path, help="new endpoint-summary JSON file")
+
+    summarize_information = subparsers.add_parser(
+        "summarize-information",
+        help="extract acquisition-level MI and CMI endpoints from an audited artifact",
+    )
+    summarize_information.add_argument("artifact", type=Path)
+    summarize_information.add_argument("output", type=Path)
+
+    describe = subparsers.add_parser(
+        "describe-states",
+        help="describe KMeans centroids using named ROI or edge features",
+    )
+    describe.add_argument("store", type=Path, help="FeatureStore used to fit the model")
+    describe.add_argument("model", type=Path, help="saved KMeans model artifact")
+    describe.add_argument("output", type=Path, help="new state-description JSON file")
+    describe.add_argument("--top-features", type=int, default=10)
+    describe.add_argument(
+        "--network-map",
+        type=Path,
+        help="optional JSON object mapping every model ROI to a network label",
+    )
+
+    infer_states = subparsers.add_parser(
+        "infer-state-metrics",
+        help="run paired sign-flip inference and declared-family FDR over state metrics",
+    )
+    infer_states.add_argument("metrics", type=Path, help="state-metrics JSON file")
+    infer_states.add_argument("output", type=Path, help="new inference artifact directory")
+    infer_states.add_argument("--condition-a", required=True)
+    infer_states.add_argument("--condition-b", required=True)
+    infer_states.add_argument(
+        "--metric",
+        action="append",
+        choices=(
+            "occupancy",
+            "mean_dwell_seconds",
+            "switch_rate",
+            "transition_probabilities",
+        ),
+        required=True,
+    )
+    infer_states.add_argument("--fdr-family", required=True)
+    infer_states.add_argument("--alpha", type=float, default=0.05)
+    infer_states.add_argument("--permutations", type=int, default=10_000)
+    infer_states.add_argument("--bootstrap", type=int, default=10_000)
+    infer_states.add_argument("--seed", type=int, required=True)
+    infer_states.add_argument("--exact", action="store_true")
+
+    adjust_results = subparsers.add_parser(
+        "adjust-result-families",
+        help="apply BH FDR once across each declared family in a result collection",
+    )
+    adjust_results.add_argument("input", type=Path, help="JSON object containing results")
+    adjust_results.add_argument("output", type=Path, help="new adjusted-results JSON file")
+    adjust_results.add_argument("--alpha", type=float, default=0.05)
+
+    infer_endpoints = subparsers.add_parser(
+        "infer-paired-endpoints",
+        help="run paired sign-flip inference over a named endpoint JSON artifact",
+    )
+    infer_endpoints.add_argument("endpoints", type=Path)
+    infer_endpoints.add_argument("output", type=Path)
+    infer_endpoints.add_argument("--condition-a", required=True)
+    infer_endpoints.add_argument("--condition-b", required=True)
+    infer_endpoints.add_argument("--fdr-family", required=True)
+    infer_endpoints.add_argument("--alpha", type=float, default=0.05)
+    infer_endpoints.add_argument("--permutations", type=int, default=10_000)
+    infer_endpoints.add_argument("--bootstrap", type=int, default=10_000)
+    infer_endpoints.add_argument("--seed", type=int, required=True)
+    infer_endpoints.add_argument("--exact", action="store_true")
+
     score = subparsers.add_parser(
         "score-states",
         help="score a saved KMeans or HMM on held-out FeatureStore acquisitions",
@@ -2470,6 +2664,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = _predict_states(namespace)
         elif namespace.command == "summarize-states":
             result = _summarize_states(namespace)
+        elif namespace.command == "summarize-store":
+            result = _summarize_store(namespace)
+        elif namespace.command == "summarize-information":
+            result = _summarize_information(namespace)
+        elif namespace.command == "describe-states":
+            result = _describe_states(namespace)
+        elif namespace.command == "infer-state-metrics":
+            result = _infer_state_metrics(namespace)
+        elif namespace.command == "adjust-result-families":
+            result = _adjust_result_families(namespace)
+        elif namespace.command == "infer-paired-endpoints":
+            result = _infer_endpoints(namespace)
         elif namespace.command == "score-states":
             result = _score_states(namespace)
         elif namespace.command == "compare-state-counts":

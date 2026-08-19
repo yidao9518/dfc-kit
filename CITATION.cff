@@ -4,6 +4,6 @@ title: "dfc-kit: Censor-aware dynamic functional connectivity tools"
 type: software
 authors:
   - name: "dfc-kit contributors"
-version: 0.28.0
+version: 0.29.0
 date-released: 2026-08-19
 license: BSD-3-Clause

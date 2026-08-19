@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-08-19
+
+### Added
+
+- Acquisition-level FeatureStore and fixed-information endpoint summaries for
+  paired scientific inference without losing ROI, edge, session, or subject
+  identity.
+- Paired sign-flip tests and participant bootstrap intervals over state
+  dynamics and generic named endpoints.
+- Study-level Benjamini-Hochberg correction across explicitly named result
+  families, preserving untestable and QC-failed records.
+- Deterministic KMeans centroid descriptions relative to the fitted cohort's
+  pooled feature distribution, with optional ROI-to-network block summaries.
+- CLI commands for state interpretation, endpoint extraction, paired
+  inference, and result-family correction.
+
 ## [0.28.0] - 2026-08-19
 
 ### Added
