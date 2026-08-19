@@ -15,6 +15,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from .connectivity.correlation import edge_index, weighted_correlation
 from .connectivity.ets import segment_standardized_samples
+from .connectivity.leida import LEiDA
 from .connectivity.mtd import globally_standardized_derivatives
 from .connectivity.windows import SlidingWindowFC
 from .data import TimeSeriesDataset, TimeSeriesRun
@@ -880,6 +881,79 @@ def write_cap_store(
     )
     for run in dataset.runs:
         append_cap(store, run, chunk_size=chunk_size)
+    return store
+
+
+def _leida_contract(estimator: LEiDA) -> str:
+    return (
+        "leida:hilbert=within-segment;"
+        f"minimum-segment-length={estimator.minimum_segment_length};"
+        "orientation=positive-vector-sum"
+    )
+
+
+def append_leida(
+    store: FeatureStore,
+    run: TimeSeriesRun,
+    estimator: LEiDA,
+    *,
+    chunk_size: int = 128,
+) -> None:
+    """Append censor-bounded LEiDA leading eigenvectors in row chunks."""
+    if run.subject is None:
+        raise ValueError("stored LEiDA requires a subject identifier")
+    size = _validated_chunk_size(chunk_size)
+    keys = _roi_feature_keys(run.roi_names)
+    contract = _leida_contract(estimator)
+    store.require_contract(
+        feature_keys=keys,
+        source_contract=contract,
+        sample_interval_seconds=run.tr,
+    )
+    result = estimator.transform(run)
+    for segment_id in dict.fromkeys(result.segment_ids.tolist()):
+        positions = np.flatnonzero(result.segment_ids == segment_id)
+
+        def parts(
+            segment_positions: NDArray[np.int64] = positions,
+        ) -> Iterator[tuple[NDArray, NDArray, NDArray]]:
+            for first in range(0, len(segment_positions), size):
+                selected = segment_positions[first : first + size]
+                indices = result.original_indices[selected]
+                yield result.leading_vectors[selected], indices, indices
+
+        store.append_sequence_parts(
+            parts(),
+            subject=run.subject,
+            session=run.session,
+            segment_id=int(segment_id),
+            acquisition_id=run.acquisition_id,
+        )
+
+
+def write_leida_store(
+    root: str | Path,
+    runs: Sequence[TimeSeriesRun],
+    estimator: LEiDA | None = None,
+    *,
+    chunk_size: int = 128,
+    dtype: str | np.dtype = "float64",
+) -> FeatureStore:
+    """Create a store of censor-bounded LEiDA leading eigenvectors."""
+    dataset = TimeSeriesDataset(runs)
+    dataset.require_subject_ids("stored LEiDA")
+    fitted_estimator = LEiDA() if estimator is None else estimator
+    if not isinstance(fitted_estimator, LEiDA):
+        raise TypeError("estimator must be a LEiDA instance")
+    store = FeatureStore.create(
+        root,
+        feature_keys=_roi_feature_keys(dataset.roi_names),
+        source_contract=_leida_contract(fitted_estimator),
+        sample_interval_seconds=dataset.tr,
+        dtype=dtype,
+    )
+    for run in dataset.runs:
+        append_leida(store, run, fitted_estimator, chunk_size=chunk_size)
     return store
 
 

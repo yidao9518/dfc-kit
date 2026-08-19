@@ -235,6 +235,37 @@ class CLITests(unittest.TestCase):
                 "cap:within-segment-roi-zscore-ddof0",
             )
 
+            leida_output = Path(temporary) / "leida.store"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                status = main(
+                    [
+                        "build-store",
+                        str(root),
+                        str(leida_output),
+                        "--atlas",
+                        "Example",
+                        "--space",
+                        "MNI152NLin2009cAsym",
+                        "--roi-selection",
+                        str(roi_file),
+                        "--method",
+                        "leida",
+                        "--minimum-segment-length",
+                        "3",
+                        "--chunk-size",
+                        "2",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            leida_summary = json.loads(stdout.getvalue())
+            self.assertEqual(leida_summary["method"], "leida")
+            self.assertEqual(leida_summary["n_samples"], 12)
+            self.assertIn(
+                "minimum-segment-length=3",
+                FeatureStore.open(leida_output).source_contract,
+            )
+
             mtd_output = Path(temporary) / "mtd.store"
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):

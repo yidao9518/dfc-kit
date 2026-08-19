@@ -1,32 +1,28 @@
 # Method inventory
 
-This inventory defines the intended library destination for methods already
-implemented in the research workflows. It does not copy project-specific
-contracts into the library.
+This inventory maps the method families available in `dfc-kit` to their public
+API and user guide. Application-specific hypotheses, cohort definitions, and
+clinical endpoints are configured by callers rather than encoded in the method
+implementations.
 
-| Method family | Planned module | Initial reference implementation |
+| Method family | Public API | Guide |
 |---|---|---|
-| Censor-bounded windows | `dfckit.segments` | `dfc_sliding_window.py` |
-| Weighted FC | `dfckit.connectivity.correlation` | `roi32_modular_dynamic_stability.py` |
-| MTD | `dfckit.connectivity.mtd` (implemented) | `audited_mtd.py` |
-| ETS | `dfckit.connectivity.ets` (implemented) | `dfc_ets.py` |
-| LEiDA | `dfckit.connectivity.leida` (implemented) | `traditional_leida.py` |
-| Low-rank subspaces | `dfckit.connectivity.lowrank` (implemented) | `system_lowrank_coordination.py` |
-| MI/CMI | `dfckit.connectivity.information` (implemented) | `fixed_length_information_hc_audit.py` |
-| Window KMeans | `dfckit.states.kmeans` (implemented) | `dfc_cluster_windows.py` |
-| Out-of-core KMeans | `dfckit.outofcore` (implemented) | large feature-store state fits |
-| Out-of-core PCA/HMM | `dfckit.outofcore`, `dfckit.outofcore_hmm` (implemented) | large sequence-state fits |
-| CAP | `dfckit.states.cap` (implemented) | `dfc_cap.py` |
-| Gaussian HMM | `dfckit.states.hmm` (implemented) | `dfc_gaussian_hmm.py` |
-| State metrics | `dfckit.states.metrics` (implemented) | CAP/HMM/KMeans runners |
-| State alignment | `dfckit.states.alignment` (implemented) | `audit_sliding_kmeans_state_stability.py` |
-| Held-out state scoring and state-count selection | `dfckit.states.scoring`, `dfckit.states.selection`, `dfckit.states.cross_validation`, `dfckit.io.state_selection`, `dfckit.outofcore`, `dfckit.outofcore_hmm` (implemented) | deterministic subject-disjoint validation, repeated-fit and participant/fold-balanced candidate comparison |
-| Partition metrics | `dfckit.networks.partition` (implemented) | `roi32_modular_dynamic_stability.py` |
-| Paired inference | `dfckit.inference` (implemented) | repeated audited implementations |
-| Motion matching | `dfckit.qc.matching` (implemented) | `sliding_state_motion_matched_windows.py` |
-| Subject-balanced reference | `dfckit.reference` (implemented) | `system_lowrank_coordination.py`, `roi32_modular_dynamic_stability.py` |
-| Paired NBS | `dfckit.inference.nbs` (experimental) | `roi32_medstate_nbs_standard.py` |
-| XCP-D input | `dfckit.io.xcpd` | audited ROI32/ROI40 loaders; implemented as the primary file input |
+| XCP-D loading and censor-bounded topology | `dfckit.io`, `dfckit.segments` | [XCP-D input](xcpd_input.md) |
+| Weighted correlation and sliding-window FC | `dfckit.connectivity.correlation`, `SlidingWindowFC` | [Correlation and sliding-window FC](correlation.md) |
+| MTD | `dfckit.connectivity.MTD` | [MTD](mtd.md) |
+| ETS | `dfckit.connectivity.ETS` | [ETS](ets.md) |
+| LEiDA and phase summaries | `dfckit.connectivity.LEiDA` | [LEiDA](leida.md) |
+| Low-rank covariance geometry | `dfckit.connectivity.LowRankCovariance` | [Low-rank covariance](lowrank.md) |
+| Fixed-length MI/CMI | `dfckit.connectivity.FixedLengthInformation` | [Information](information.md) |
+| Partition and graph metrics | `dfckit.networks` | [Partition graphs](partition_graphs.md) |
+| CAP, KMeans, and Gaussian HMM states | `dfckit.states` | [State models](states.md) |
+| State alignment and repeated-fit stability | `dfckit.states.alignment`, `dfckit.states.stability` | [State alignment](state_alignment.md), [stability](state_stability.md) |
+| Held-out scoring and state-count selection | `dfckit.states.scoring`, `dfckit.states.selection`, `dfckit.io` | [State scoring](state_scoring.md), [selection](state_selection.md) |
+| Nested participant-disjoint validation | `dfckit.io`, `dfckit.outofcore` | [Nested validation](nested_cross_validation.md) |
+| Paired inference and multiple testing | `dfckit.inference` | [Paired inference](inference.md) |
+| Motion summaries and within-subject matching | `dfckit.qc` | [Motion matching](qc_matching.md) |
+| FeatureStores and portable model artifacts | `dfckit.storage`, `dfckit.io` | [Storage](storage.md), [model artifacts](model_artifacts.md) |
+| Paired NBS | `dfckit.inference.nbs` | [NBS](nbs.md) (experimental) |
 
 NBS remains explicitly experimental. Its tail handling, component statistic,
 permutation unit, and threshold sensitivity now have independent unit tests.

@@ -11,7 +11,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from .connectivity import SlidingWindowFC
+from .connectivity import LEiDA, SlidingWindowFC
 from .data import TimeSeriesDataset
 from .io import (
     StatePredictions,
@@ -87,6 +87,7 @@ from .storage import (
     FeatureStore,
     write_cap_store,
     write_ets_store,
+    write_leida_store,
     write_mtd_store,
     write_window_fc_store,
 )
@@ -241,6 +242,14 @@ def _build_store(namespace: argparse.Namespace) -> dict[str, object]:
         store = write_cap_store(
             namespace.output,
             dataset.runs,
+            chunk_size=namespace.chunk_size,
+            dtype=namespace.dtype,
+        )
+    elif namespace.method == "leida":
+        store = write_leida_store(
+            namespace.output,
+            dataset.runs,
+            LEiDA(minimum_segment_length=namespace.minimum_segment_length),
             chunk_size=namespace.chunk_size,
             dtype=namespace.dtype,
         )
@@ -2008,12 +2017,17 @@ def _parser() -> argparse.ArgumentParser:
     _add_xcpd_arguments(build)
     _add_load_arguments(build)
     build.add_argument("output", type=Path, help="new FeatureStore directory")
-    build.add_argument("--method", choices=("window-fc", "cap", "ets", "mtd"), required=True)
+    build.add_argument(
+        "--method",
+        choices=("window-fc", "cap", "ets", "leida", "mtd"),
+        required=True,
+    )
     build.add_argument("--chunk-size", type=int, default=128)
     build.add_argument("--dtype", choices=("float32", "float64"), default="float64")
     build.add_argument("--window-length", type=int, default=56)
     build.add_argument("--window-step", type=int, default=8)
     build.add_argument("--taper", choices=("hamming", "uniform"), default="hamming")
+    build.add_argument("--minimum-segment-length", type=int, default=20)
 
     fit = subparsers.add_parser(
         "fit-states",

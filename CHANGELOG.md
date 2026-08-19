@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-08-19
+
+### Added
+
+- A censor-gap-safe LEiDA FeatureStore writer that stores leading phase-coherence
+  eigenvectors with an explicit minimum-segment-length and orientation contract.
+- `build-store --method leida` with configurable minimum retained-segment length,
+  preserving original frame indices and segment identities for downstream state
+  modeling.
+
 ## [0.26.0] - 2026-08-19
 
 ### Added

@@ -98,6 +98,30 @@ source contract is `cap:within-segment-roi-zscore-ddof0`, and the feature keys
 are the ROI names in their input order. Standardization is performed before
 chunking, so changing `chunk_size` does not change CAP values.
 
+## Stream LEiDA
+
+LEiDA stores contain one leading phase-coherence eigenvector per retained frame.
+Hilbert phase is estimated separately within each censor-bounded segment, and
+segments shorter than the configured minimum are omitted:
+
+```python
+from dfckit.connectivity import LEiDA
+from dfckit.storage import append_leida, write_leida_store
+
+store = write_leida_store(
+    "/path/to/leida.store",
+    runs,
+    LEiDA(minimum_segment_length=20),
+    chunk_size=256,
+)
+append_leida(store, another_run, LEiDA(minimum_segment_length=20), chunk_size=256)
+```
+
+The source contract is
+`leida:hilbert=within-segment;minimum-segment-length=20;orientation=positive-vector-sum`.
+The writer preserves the original frame index in both sample-index columns and
+never joins two censor-delimited segments.
+
 ## Read and append
 
 ```python

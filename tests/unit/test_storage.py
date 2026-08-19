@@ -6,20 +6,23 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from dfckit import TimeSeriesDataset, TimeSeriesRun
-from dfckit.connectivity import ETS, MTD, SlidingWindowFC
+from dfckit.connectivity import ETS, MTD, LEiDA, SlidingWindowFC
 from dfckit.states import (
     FeatureSequence,
     FeatureSequenceDataset,
     cap_sequences,
+    leida_sequences,
     window_fc_sequences,
 )
 from dfckit.storage import (
     FeatureStore,
     append_cap,
+    append_leida,
     append_mtd,
     append_window_fc,
     write_cap_store,
     write_ets_store,
+    write_leida_store,
     write_mtd_store,
     write_window_fc_store,
 )
@@ -375,6 +378,47 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
         )
         with TemporaryDirectory() as temporary, self.assertRaisesRegex(ValueError, "CAP requires"):
             write_cap_store(Path(temporary) / "cap", (run,))
+
+    def test_stored_leida_matches_materialized_leading_vectors(self):
+        estimator = LEiDA(minimum_segment_length=10)
+        expected = leida_sequences((estimator.transform(self.run),))
+        with TemporaryDirectory() as temporary:
+            store = write_leida_store(
+                Path(temporary) / "leida",
+                (self.run,),
+                estimator,
+                chunk_size=5,
+            )
+            observed = store.read_dataset()
+
+            self.assertEqual(store.source_contract, expected.source_contract)
+            self.assertEqual(store.feature_keys, expected.feature_keys)
+            self.assertEqual(store.n_samples, expected.n_samples)
+            self.assertEqual(store.n_sequences, len(expected.sequences))
+            for left, right in zip(observed.sequences, expected.sequences, strict=True):
+                np.testing.assert_array_equal(left.values, right.values)
+                np.testing.assert_array_equal(
+                    left.sample_start_indices, right.sample_start_indices
+                )
+                np.testing.assert_array_equal(left.sample_end_indices, right.sample_end_indices)
+                self.assertEqual(left.segment_id, right.segment_id)
+                self.assertEqual(left.subject, right.subject)
+                self.assertEqual(left.session, right.session)
+                self.assertEqual(left.acquisition_id, right.acquisition_id)
+            self.assertTrue(all(chunk.values.shape[0] <= 5 for chunk in store.iter_chunks()))
+
+            with self.assertRaisesRegex(ValueError, "already contains"):
+                append_leida(store, self.run, estimator, chunk_size=5)
+
+    def test_leida_store_rejects_non_leida_estimator(self):
+        with TemporaryDirectory() as temporary, self.assertRaisesRegex(
+            TypeError, "LEiDA instance"
+        ):
+            write_leida_store(
+                Path(temporary) / "leida",
+                (self.run,),
+                object(),  # type: ignore[arg-type]
+            )
 
     def test_streamed_mtd_matches_materialized_result_and_preserves_gap_segments(self):
         expected = MTD().transform(self.run)

@@ -5,6 +5,19 @@ sliding-window FC samples or instantaneous CAP samples, but transitions and
 dwell runs are never formed between two censor-delimited segments or between
 different acquisitions.
 
+LEiDA leading vectors can be persisted as the same feature geometry used by
+state models:
+
+```bash
+dfc-kit build-store /path/to/xcp_d /path/to/features/leida.store \
+  --atlas Glasser --roi-selection rois.json --method leida \
+  --minimum-segment-length 20 --tr 0.75
+```
+
+The store contains ROI-wise leading phase-coherence vectors. It does not include
+the separate phase-block summary measures, which should remain in their own
+analysis artifact.
+
 ## Sliding-window KMeans
 
 ```python

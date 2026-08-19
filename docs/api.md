@@ -153,10 +153,12 @@ from dfckit.storage import (
     FeatureStore,
     append_cap,
     append_ets,
+    append_leida,
     append_mtd,
     append_window_fc,
     write_cap_store,
     write_ets_store,
+    write_leida_store,
     write_mtd_store,
     write_window_fc_store,
 )
@@ -182,6 +184,25 @@ original frame indices. Its source contract is
 `cap:within-segment-roi-zscore-ddof0`; it does not create connectivity edges.
 Each segment is a separate sequence, so later occupancy, dwell, and transition
 metrics remain gap-safe. Segments shorter than two retained frames are omitted.
+
+LEiDA uses the same ROI feature geometry while retaining its own phase contract:
+
+```python
+from dfckit.connectivity import LEiDA
+
+leida = LEiDA(minimum_segment_length=20)
+leida_store = write_leida_store(
+    "/path/to/leida.store",
+    runs,
+    leida,
+    chunk_size=256,
+)
+append_leida(leida_store, another_run, leida, chunk_size=256)
+```
+
+Every eligible censor-bounded segment is Hilbert transformed independently.
+The store contains oriented leading phase-coherence vectors with one ROI per
+feature; it does not contain the separate phase-block summary measures.
 
 For state fitting without reconstructing all rows in memory:
 

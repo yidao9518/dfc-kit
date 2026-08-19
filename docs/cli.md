@@ -102,6 +102,29 @@ The store source contract is
 two retained frames is omitted; all other rows retain the original frame index
 and segment ID. CAP stores contain ROI patterns, not FC edges.
 
+Build a LEiDA leading-vector store. The Hilbert phase and leading
+phase-coherence eigenvector are computed independently within every retained
+segment; segments shorter than the requested minimum are omitted:
+
+```bash
+python -m pip install 'dfc-kit[phase]'
+```
+
+```bash
+dfc-kit build-store /path/to/xcp_d /path/to/features/leida.store \
+  --atlas Glasser \
+  --space MNI152NLin2009cAsym \
+  --roi-selection rois.json \
+  --method leida \
+  --minimum-segment-length 20 \
+  --chunk-size 256 \
+  --tr 0.75
+```
+
+The source contract records the minimum segment length and the positive-vector-sum
+orientation. LEiDA stores contain one leading eigenvector value per selected ROI;
+they are state-model features, not phase-block summary metrics.
+
 ## Fit a state model
 
 By default, `fit-states --method kmeans` uses `--fitting-mode streaming` with

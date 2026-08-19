@@ -50,10 +50,11 @@ objects used by synthetic tests. Numerical kernels therefore remain independent
 from file naming and local directory layouts even though XCP-D is the supported
 production input.
 
-## Migration rule
+## Extension and validation
 
-Research scripts are not moved into this repository. A method is reimplemented
-from a selected canonical definition, tested mathematically on synthetic data,
-and then compared against a frozen research output. Only after numerical
-equivalence is demonstrated may a research runner optionally adopt the released
-library in a separate change.
+New estimators should be defined from a documented mathematical contract,
+tested on synthetic data, and accompanied by explicit metadata for frame
+indices, segment identity, feature order, and participant grouping. When a
+reference implementation is available, numerical regression tests can be kept
+alongside the estimator without making that application-specific workflow a
+runtime dependency of the library.
