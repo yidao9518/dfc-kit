@@ -121,7 +121,7 @@ def _intercept_t_with_design(
     return statistic
 
 
-def intercept_t_statistic(
+def _intercept_t_statistic(
     differences: ArrayLike,
     confounds: ArrayLike | None = None,
 ) -> NDArray[np.float64]:
@@ -236,7 +236,7 @@ def _tail_components(
     return tuple(output)
 
 
-def threshold_components(
+def _threshold_components(
     statistics: ArrayLike,
     edge_i: ArrayLike,
     edge_j: ArrayLike,
@@ -421,7 +421,7 @@ def paired_nbs(
     observed_t = _intercept_t_with_design(values, design, inverse, degrees)
     observed_mean = values.mean(axis=0)
     observed = {
-        cutoff: threshold_components(
+        cutoff: _threshold_components(
             observed_t,
             left,
             right,
@@ -462,7 +462,7 @@ def paired_nbs(
         permuted = fitted + residual * signs
         permuted_t = _intercept_t_with_design(permuted, design, inverse, degrees)
         for cutoff in cutoffs:
-            components = threshold_components(
+            components = _threshold_components(
                 permuted_t,
                 left,
                 right,

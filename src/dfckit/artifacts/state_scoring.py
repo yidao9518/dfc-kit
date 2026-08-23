@@ -25,7 +25,7 @@ FORMAT_NAME = "dfckit-state-model-scores"
 FORMAT_VERSION = 3
 
 
-def state_model_specification(
+def _state_model_specification(
     model: KMeansStateModel | GaussianHMMStateModel,
 ) -> dict[str, object]:
     """Return the complete score-comparison specification of a fitted model."""
@@ -56,7 +56,7 @@ def state_model_specification(
     raise TypeError("state-model specification requires KMeans or Gaussian HMM")
 
 
-def run_boundaries(
+def _run_boundaries(
     report: StateModelScoreReport,
 ) -> tuple[tuple[object, ...], ...]:
     """Return acquisition identities used to compare score collections."""
@@ -202,7 +202,7 @@ class StateModelScoreReport:
             "model_specification",
             MappingProxyType(specification),
         )
-        canonical = state_model_scores_payload(
+        canonical = _state_model_scores_payload(
             self.scores,
             model_kind=self.model_kind,
             model_seed=self.model_seed,
@@ -235,7 +235,7 @@ class StateModelScoreReport:
         return sum(score.n_samples for score in self.scores)
 
 
-def state_model_scores_payload(
+def _state_model_scores_payload(
     scores: Sequence[RunStateModelScore],
     *,
     model_kind: str,
@@ -471,7 +471,7 @@ def load_state_model_scores(path: str | Path) -> StateModelScoreReport:
         allow_fit_subjects=raw["allow_fit_subjects"],
         model_specification=raw["model_specification"],
     )
-    canonical = state_model_scores_payload(
+    canonical = _state_model_scores_payload(
         report.scores,
         model_kind=report.model_kind,
         model_seed=report.model_seed,
@@ -496,7 +496,7 @@ def write_state_model_scores(
 ) -> Path:
     """Atomically write held-out state-model scores without JSON NaN values."""
     target = Path(path)
-    payload = state_model_scores_payload(scores, **metadata)
+    payload = _state_model_scores_payload(scores, **metadata)
     return write_json_atomic(target, payload)
 
 
@@ -505,8 +505,5 @@ __all__ = [
     "FORMAT_VERSION",
     "StateModelScoreReport",
     "load_state_model_scores",
-    "run_boundaries",
-    "state_model_scores_payload",
-    "state_model_specification",
     "write_state_model_scores",
 ]

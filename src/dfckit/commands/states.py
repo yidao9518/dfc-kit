@@ -10,10 +10,10 @@ from ..artifacts import (
     load_state_predictions,
     save_fitted_model,
     save_state_predictions,
-    state_model_specification,
     write_state_metrics,
     write_state_model_scores,
 )
+from ..artifacts.state_scoring import _state_model_specification
 from ..states.hmm import GaussianHMMStateModel
 from ..states.kmeans import KMeansStateModel
 from ..states.metrics import summarize_state_assignments
@@ -250,7 +250,7 @@ def score_states(namespace: argparse.Namespace) -> dict[str, object]:
         minimum_sequence_length=minimum_sequence_length,
         omitted_short_sequence_count=omitted_short_sequence_count,
         allow_fit_subjects=namespace.allow_fit_subjects,
-        model_specification=state_model_specification(model),
+        model_specification=_state_model_specification(model),
     )
     return {
         "output": str(output),

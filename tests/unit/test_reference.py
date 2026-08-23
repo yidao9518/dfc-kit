@@ -2,7 +2,8 @@ import unittest
 
 import numpy as np
 
-from dfckit import (
+from dfckit.connectivity import mean_projector_basis, subspace_distance, subspace_similarity
+from dfckit.reference import (
     fit_feature_reference,
     fit_subspace_reference,
     leave_one_subject_out_feature_similarity,
@@ -12,7 +13,6 @@ from dfckit import (
     score_subspace_reference,
     subject_balanced_quantiles,
 )
-from dfckit.connectivity import mean_projector_basis, subspace_distance, subspace_similarity
 
 
 class FeatureReferenceTests(unittest.TestCase):

@@ -8,13 +8,13 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from .._preprocessing import _segment_standardized_samples
 from ..connectivity._edge_products import edge_products
 from ..connectivity.correlation import edge_index, weighted_correlation
 from ..connectivity.instantaneous import _InstantaneousEstimator, _InstantaneousRows
 from ..connectivity.leida import LEiDA
 from ..connectivity.windows import SlidingWindowFC
 from ..data import TimeSeriesDataset, TimeSeriesRun
-from ..preprocessing import segment_standardized_samples
 from .store import FeatureStore, _validated_chunk_size
 
 FeatureKey = tuple[str, ...]
@@ -214,7 +214,7 @@ def append_cap(
         source_contract=contract,
         sample_interval_seconds=run.tr,
     )
-    standardized, original, segment_ids = segment_standardized_samples(run, method_name="CAP")
+    standardized, original, segment_ids = _segment_standardized_samples(run, method_name="CAP")
     for segment_id in dict.fromkeys(segment_ids.tolist()):
         positions = np.flatnonzero(segment_ids == segment_id)
 

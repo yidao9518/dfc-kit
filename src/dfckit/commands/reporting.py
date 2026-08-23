@@ -5,22 +5,22 @@ from __future__ import annotations
 import argparse
 
 from ..artifacts import load_state_model_scores
-from ..inference import (
-    infer_paired_endpoints_file,
-    infer_paired_state_metrics_file,
-    write_paired_endpoint_inference,
-    write_paired_state_inference,
+from ..inference.endpoints import (
+    _infer_paired_endpoints_file,
+    _write_paired_endpoint_inference,
+)
+from ..inference.state_metrics import (
+    _infer_paired_state_metrics_file,
+    _write_paired_state_inference,
 )
 from ..information.summary import summarize_information_artifact, write_information_summary
-from ..states import (
-    compare_state_model_scores,
-    write_state_count_comparison,
-)
+from ..states import compare_state_model_scores
 from ..states.interpretation import (
     describe_state_artifacts,
     write_state_description,
 )
-from ..storage import summarize_store_file, write_store_summary
+from ..states.selection import _write_state_count_comparison
+from ..storage.summary import _summarize_store_file, _write_store_summary
 
 
 def describe_states(namespace: argparse.Namespace) -> dict[str, object]:
@@ -44,7 +44,7 @@ def describe_states(namespace: argparse.Namespace) -> dict[str, object]:
 
 def infer_state_metrics(namespace: argparse.Namespace) -> dict[str, object]:
     """Run paired inference over selected state metrics."""
-    payload = infer_paired_state_metrics_file(
+    payload = _infer_paired_state_metrics_file(
         namespace.metrics,
         condition_a=namespace.condition_a,
         condition_b=namespace.condition_b,
@@ -56,7 +56,7 @@ def infer_state_metrics(namespace: argparse.Namespace) -> dict[str, object]:
         seed=namespace.seed,
         exact=namespace.exact,
     )
-    output = write_paired_state_inference(payload, namespace.output)
+    output = _write_paired_state_inference(payload, namespace.output)
     counts = {
         status: sum(result["result_status"] == status for result in payload["results"])
         for status in ("positive", "negative", "not_testable")
@@ -74,8 +74,8 @@ def infer_state_metrics(namespace: argparse.Namespace) -> dict[str, object]:
 def summarize_store(namespace: argparse.Namespace) -> dict[str, object]:
     """Write acquisition-level feature statistics from a FeatureStore."""
     statistics = tuple(namespace.statistic or ("mean",))
-    payload = summarize_store_file(namespace.store, statistics)
-    output = write_store_summary(payload, namespace.output)
+    payload = _summarize_store_file(namespace.store, statistics)
+    output = _write_store_summary(payload, namespace.output)
     return {
         "output": str(output),
         "source_contract": payload["source_contract"],
@@ -88,7 +88,7 @@ def summarize_store(namespace: argparse.Namespace) -> dict[str, object]:
 
 def infer_endpoints(namespace: argparse.Namespace) -> dict[str, object]:
     """Run paired inference over named acquisition-level endpoints."""
-    payload = infer_paired_endpoints_file(
+    payload = _infer_paired_endpoints_file(
         namespace.endpoints,
         condition_a=namespace.condition_a,
         condition_b=namespace.condition_b,
@@ -99,7 +99,7 @@ def infer_endpoints(namespace: argparse.Namespace) -> dict[str, object]:
         seed=namespace.seed,
         exact=namespace.exact,
     )
-    output = write_paired_endpoint_inference(payload, namespace.output)
+    output = _write_paired_endpoint_inference(payload, namespace.output)
     return {
         "output": str(output),
         "contrast": payload["contrast"],
@@ -131,7 +131,7 @@ def compare_state_counts(namespace: argparse.Namespace) -> dict[str, object]:
     comparison = compare_state_model_scores(
         reports,
     )
-    output = write_state_count_comparison(comparison, namespace.output)
+    output = _write_state_count_comparison(comparison, namespace.output)
     return {
         "output": str(output),
         "model_kind": comparison.model_kind,

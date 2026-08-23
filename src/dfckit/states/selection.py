@@ -19,7 +19,7 @@ from numpy.typing import NDArray
 from .._arrays import readonly_copy as _readonly
 from ..artifacts._fields import sample_intervals_match
 from ..artifacts._json import write_json_atomic
-from ..artifacts.state_scoring import StateModelScoreReport, run_boundaries
+from ..artifacts.state_scoring import StateModelScoreReport, _run_boundaries
 from .scoring import RunKMeansScore
 
 
@@ -387,7 +387,7 @@ def compare_state_model_scores(
             if (
                 report.fit_subjects != fold_reference.fit_subjects
                 or report.subjects != fold_reference.subjects
-                or run_boundaries(report) != run_boundaries(fold_reference)
+                or _run_boundaries(report) != _run_boundaries(fold_reference)
                 or report.omitted_short_sequence_count
                 != fold_reference.omitted_short_sequence_count
             ):
@@ -465,7 +465,7 @@ def compare_state_model_scores(
     )
 
 
-def state_count_comparison_payload(comparison: StateCountComparison) -> dict[str, object]:
+def _state_count_comparison_payload(comparison: StateCountComparison) -> dict[str, object]:
     """Convert a state-count comparison to JSON-compatible values."""
     selection = comparison.selection
     candidates = [
@@ -498,12 +498,12 @@ def state_count_comparison_payload(comparison: StateCountComparison) -> dict[str
     }
 
 
-def write_state_count_comparison(
+def _write_state_count_comparison(
     comparison: StateCountComparison,
     path: str | Path,
 ) -> Path:
     """Write a state-count comparison as JSON."""
-    return write_json_atomic(path, state_count_comparison_payload(comparison))
+    return write_json_atomic(path, _state_count_comparison_payload(comparison))
 
 
 __all__ = [
@@ -513,6 +513,4 @@ __all__ = [
     "StateCountSelection",
     "compare_state_model_scores",
     "select_state_count",
-    "state_count_comparison_payload",
-    "write_state_count_comparison",
 ]

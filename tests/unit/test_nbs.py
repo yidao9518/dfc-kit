@@ -2,7 +2,8 @@ import unittest
 
 import numpy as np
 
-from dfckit.inference import intercept_t_statistic, paired_nbs, threshold_components
+from dfckit.inference import paired_nbs
+from dfckit.inference.nbs import _intercept_t_statistic, _threshold_components
 
 
 class NBSComponentTests(unittest.TestCase):
@@ -10,7 +11,7 @@ class NBSComponentTests(unittest.TestCase):
         edge_i, edge_j = np.triu_indices(4, 1)
         statistics = np.asarray([3.2, -3.1, 0.0, 3.4, 0.0, -4.0])
 
-        components = threshold_components(statistics, edge_i, edge_j, 4, 2.0)
+        components = _threshold_components(statistics, edge_i, edge_j, 4, 2.0)
 
         self.assertEqual(components["positive"][0].node_indices, (0, 1, 2))
         self.assertEqual(components["negative"][0].node_indices, (0, 2, 3))
@@ -25,7 +26,7 @@ class NBSComponentTests(unittest.TestCase):
         edge_i, edge_j = np.triu_indices(4, 1)
         statistics = np.asarray([3.2, -3.1, 0.0, 3.4, 0.0, -4.0])
 
-        components = threshold_components(
+        components = _threshold_components(
             statistics,
             edge_i,
             edge_j,
@@ -50,10 +51,10 @@ class NBSComponentTests(unittest.TestCase):
             statistics[lookup[edge]] = 2.1
         statistics[lookup[(3, 4)]] = 8.0
 
-        extent = threshold_components(
+        extent = _threshold_components(
             statistics, edge_i, edge_j, 7, 2.0, component_statistic="edge_extent"
         )["positive"]
-        intensity = threshold_components(
+        intensity = _threshold_components(
             statistics,
             edge_i,
             edge_j,
@@ -69,18 +70,18 @@ class NBSComponentTests(unittest.TestCase):
 
     def test_component_input_validation_rejects_duplicate_and_reversed_edges(self):
         with self.assertRaisesRegex(ValueError, "duplicate"):
-            threshold_components([3.0, 4.0], [0, 0], [1, 1], 3, 2.0)
+            _threshold_components([3.0, 4.0], [0, 0], [1, 1], 3, 2.0)
         with self.assertRaisesRegex(ValueError, "edge_i < edge_j"):
-            threshold_components([3.0], [1], [0], 3, 2.0)
+            _threshold_components([3.0], [1], [0], 3, 2.0)
         with self.assertRaisesRegex(ValueError, "component_sign_mode"):
-            threshold_components(
+            _threshold_components(
                 [3.0], [0], [1], 2, 2.0, component_sign_mode="unknown"
             )
 
     def test_edges_exactly_at_cutoff_are_not_suprathreshold(self):
         edge_i, edge_j = np.triu_indices(3, 1)
 
-        components = threshold_components(
+        components = _threshold_components(
             [2.0, -2.0, 2.000001], edge_i, edge_j, 3, 2.0
         )
 
@@ -222,7 +223,7 @@ class PairedNBSTests(unittest.TestCase):
             self.assertEqual(component.fwe_pvalue, expected)
 
     def test_t_statistic_matches_direct_intercept_only_formula(self):
-        observed = intercept_t_statistic(self.differences)
+        observed = _intercept_t_statistic(self.differences)
         expected = self.differences.mean(axis=0) / (
             self.differences.std(axis=0, ddof=1) / np.sqrt(len(self.differences))
         )

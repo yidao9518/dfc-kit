@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from dfckit import TimeSeriesRun
-from dfckit.preprocessing import segment_standardized_samples
+from dfckit._preprocessing import _segment_standardized_samples
 
 
 class SegmentStandardizationTests(unittest.TestCase):
@@ -21,7 +21,7 @@ class SegmentStandardizationTests(unittest.TestCase):
             roi_names=("visual", "motor"),
         )
 
-        values, original, segments = segment_standardized_samples(run, method_name="test")
+        values, original, segments = _segment_standardized_samples(run, method_name="test")
 
         np.testing.assert_allclose(values, [[-1.0, 0.0], [1.0, 0.0], [-1.0, -1.0], [1.0, 1.0]])
         np.testing.assert_array_equal(original, [0, 1, 4, 5])

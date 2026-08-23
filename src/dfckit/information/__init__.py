@@ -6,12 +6,9 @@ from .estimators import (
     FixedLengthInformationResult,
     FixedWindowSamples,
     block_information,
-    eligible_fixed_window_count,
-    estimate_fixed_windows,
     knn_cmi,
     knn_mi,
     sample_fixed_windows,
-    zscore_columns,
 )
 from .fixed import (
     FixedInformationArtifact,
@@ -38,8 +35,6 @@ __all__ = [
     "InformationGroups",
     "block_information",
     "compute_fixed_information",
-    "eligible_fixed_window_count",
-    "estimate_fixed_windows",
     "knn_cmi",
     "knn_mi",
     "load_fixed_information",
@@ -47,5 +42,4 @@ __all__ = [
     "load_information_groups",
     "sample_fixed_windows",
     "save_fixed_information",
-    "zscore_columns",
 ]

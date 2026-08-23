@@ -7,9 +7,8 @@ from dfckit.artifacts import StateModelScoreReport
 from dfckit.states import (
     RunKMeansScore,
     compare_state_model_scores,
-    state_count_comparison_payload,
-    write_state_count_comparison,
 )
+from dfckit.states.selection import _state_count_comparison_payload, _write_state_count_comparison
 
 
 def _report(fold: int, n_states: int, seed: int, score: float) -> StateModelScoreReport:
@@ -62,10 +61,10 @@ class StateSelectionTests(unittest.TestCase):
 
     def test_payload_and_writer_are_compact(self):
         comparison = compare_state_model_scores(_reports())
-        payload = state_count_comparison_payload(comparison)
+        payload = _state_count_comparison_payload(comparison)
         self.assertEqual(payload["best_n_states"], 4)
         with TemporaryDirectory() as temporary:
-            path = write_state_count_comparison(comparison, Path(temporary) / "state-counts.json")
+            path = _write_state_count_comparison(comparison, Path(temporary) / "state-counts.json")
             self.assertEqual(json.loads(path.read_text())["best_n_states"], 4)
 
     def test_incomplete_seed_grid_is_rejected(self):

@@ -8,13 +8,12 @@ Public names should be imported from the package area that owns the operation.
 ```python
 from dfckit import TimeSeriesRun, TimeSeriesDataset, validate_subject_disjoint
 from dfckit.io import load_xcpd_run, discover_xcpd_runs
-from dfckit.preprocessing import segment_standardized_samples
 ```
 
 `TimeSeriesRun` carries ROI time series, original frame indices, and acquisition
-metadata. XCP-D loaders preserve censor gaps. `segment_standardized_samples`
-z-scores each ROI within each uninterrupted retained segment; ETS and CAP use
-this operation.
+metadata. XCP-D loaders preserve censor gaps. ETS and CAP perform their required
+within-segment standardization internally; the shared standardization helper is
+an implementation detail rather than a public preprocessing API.
 
 ## Connectivity
 
@@ -80,7 +79,7 @@ model parameters on load.
 
 ```python
 from dfckit.states import summarize_state_assignments
-from dfckit.states.alignment import align_kmeans_centroids
+from dfckit.states import align_kmeans_centroids
 from dfckit.artifacts import save_state_alignment
 ```
 
@@ -114,3 +113,12 @@ from dfckit.inference import ols_hc3, paired_hc3, paired_nbs, paired_sign_flip
 Inference modules provide paired sign flips, bootstrap intervals, HC3 models,
 declared-family FDR, and paired NBS. These are independent of state-count
 selection and model persistence.
+
+## Advanced interfaces
+
+Large-store fitting and artifact-format adapters are available for applications
+that need them, but they are intentionally kept outside the compact package
+surface. Use the documented command-line workflows or the advanced guides for
+`dfckit.states.streaming`, `dfckit.states.streaming_hmm`, and direct artifact
+serialization. Internal payload builders, file adapters, NBS component kernels,
+and censor-segment preprocessing helpers are not stable public interfaces.

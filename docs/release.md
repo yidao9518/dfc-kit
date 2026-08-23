@@ -26,8 +26,8 @@
    citation metadata, and no private data or local server paths.
 6. Create an annotated version tag only after CI passes.
 
-## Pre-1.0 compatibility
+## 1.x compatibility
 
-Pre-1.0 releases may revise public APIs. Data, connectivity, state, reference,
-Matching, NBS, and paired-inference objects should retain backward-compatible field
-semantics within a minor release.
+The 1.x series follows semantic versioning. Patch releases contain fixes and
+documentation changes; minor releases may add public APIs without changing
+existing field semantics; breaking API changes require a new major version.

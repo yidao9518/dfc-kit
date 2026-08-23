@@ -46,8 +46,6 @@ from .selection import (
     StateCountSelection,
     compare_state_model_scores,
     select_state_count,
-    state_count_comparison_payload,
-    write_state_count_comparison,
 )
 from .stability import RunStateStability, summarize_state_stability
 
@@ -92,10 +90,8 @@ __all__ = [
     "relabel_gaussian_hmm_model",
     "relabel_kmeans_model",
     "select_state_count",
-    "state_count_comparison_payload",
     "summarize_state_assignments",
     "summarize_state_stability",
     "timeseries_sequences",
     "window_fc_sequences",
-    "write_state_count_comparison",
 ]

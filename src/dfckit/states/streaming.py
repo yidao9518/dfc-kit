@@ -17,7 +17,8 @@ from numpy.typing import NDArray
 
 from .._arrays import readonly_copy as _readonly
 from .._validation import validated_positive_integer as _positive_int
-from ..storage import FeatureStore, StoredFeatureChunk
+from ..storage import FeatureStore
+from ..storage.store import StoredFeatureChunk
 from .data import FeatureKey, StateAssignments, StateLabelSequence
 from .kmeans import KMeansFitResult, KMeansStateModel, fit_kmeans_states
 from .scoring import RunKMeansScore

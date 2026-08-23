@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from .._preprocessing import _segment_standardized_samples
 from ..data import TimeSeriesDataset
-from ..preprocessing import segment_standardized_samples
 from .data import FeatureSequence, FeatureSequenceDataset
 from .kmeans import KMeansFitResult, fit_kmeans_states
 
@@ -17,7 +17,7 @@ def cap_sequences(dataset: TimeSeriesDataset) -> FeatureSequenceDataset:
     sequences: list[FeatureSequence] = []
     for run in dataset.runs:
         assert run.subject is not None
-        standardized, original_indices, segment_ids = segment_standardized_samples(
+        standardized, original_indices, segment_ids = _segment_standardized_samples(
             run, method_name="CAP"
         )
         for segment_id in dict.fromkeys(segment_ids.tolist()):

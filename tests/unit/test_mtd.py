@@ -3,9 +3,8 @@ import unittest
 import numpy as np
 
 from dfckit import TimeSeriesRun
-from dfckit.connectivity import (
-    MTD,
-    InstantaneousEdgeResult,
+from dfckit.connectivity import MTD, InstantaneousEdgeResult
+from dfckit.connectivity._edge_products import (
     cross_block_products,
     edge_products,
     within_block_products,

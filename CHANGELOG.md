@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-08-24
 
 - Moved MI/CMI estimators and fixed-window orchestration into
   `dfckit.information`.

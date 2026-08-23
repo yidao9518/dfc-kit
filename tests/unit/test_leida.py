@@ -4,8 +4,8 @@ import unittest
 import numpy as np
 
 from dfckit import TimeSeriesRun
-from dfckit.connectivity import (
-    LEiDA,
+from dfckit.connectivity import LEiDA
+from dfckit.connectivity.leida import (
     analytic_phase,
     cross_block_phase_coherence,
     leading_phase_eigenvectors,

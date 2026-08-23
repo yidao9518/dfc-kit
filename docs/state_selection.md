@@ -24,6 +24,6 @@ candidate and seed grids in every fold, identical held-out runs within a fold,
 and no subject appearing in more than one validation fold.
 
 The returned `StateCountComparison` contains fold scores, candidate means and
-standard errors, ranks, and both the best-K and one-standard-error choices.
-`state_count_comparison_payload` and `write_state_count_comparison` provide a
-small JSON summary for reports.
+standard errors, ranks, and both the best-K and one-standard-error choices. The
+CLI writes a compact JSON summary when a portable report is needed; its payload
+builder is an implementation detail of that command.

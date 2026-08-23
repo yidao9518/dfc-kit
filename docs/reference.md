@@ -24,7 +24,7 @@ participant with one session. Feature identity and order are stored in the
 model.
 
 ```python
-from dfckit import fit_feature_reference, score_feature_reference
+from dfckit.reference import fit_feature_reference, score_feature_reference
 
 reference = fit_feature_reference(
     hc_window_features,
@@ -65,7 +65,7 @@ leave-one-subject-out distance distribution. The model stores its mean and
 sample standard deviation.
 
 ```python
-from dfckit import fit_subspace_reference, score_subspace_reference
+from dfckit.reference import fit_subspace_reference, score_subspace_reference
 
 reference = fit_subspace_reference(
     hc_run_bases,

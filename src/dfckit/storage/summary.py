@@ -11,7 +11,7 @@ from typing import Any
 from ._statistics import StreamingFeatureMoments
 from .store import FeatureStore
 
-STORE_STATISTICS = (
+_STORE_STATISTICS = (
     "mean",
     "variance",
     "standard_deviation",
@@ -28,7 +28,7 @@ def _validated_statistics(statistics: Sequence[str]) -> tuple[str, ...]:
         raise ValueError("statistics must contain at least one value")
     if any(not isinstance(statistic, str) for statistic in selected):
         raise TypeError("statistics must contain strings")
-    unsupported = sorted(set(selected) - set(STORE_STATISTICS))
+    unsupported = sorted(set(selected) - set(_STORE_STATISTICS))
     if unsupported:
         raise ValueError(f"unsupported store statistics: {unsupported}")
     if len(set(selected)) != len(selected):
@@ -110,14 +110,14 @@ def summarize_store_statistics(
     }
 
 
-def summarize_store_file(
+def _summarize_store_file(
     path: str | Path,
     statistics: Sequence[str] = ("mean",),
 ) -> dict[str, Any]:
     return summarize_store_statistics(FeatureStore.open(path), statistics)
 
 
-def write_store_summary(payload: dict[str, Any], path: str | Path) -> Path:
+def _write_store_summary(payload: dict[str, Any], path: str | Path) -> Path:
     target = Path(path)
     if target.exists() or target.is_symlink():
         raise FileExistsError(f"store-summary output already exists: {target}")
@@ -136,8 +136,5 @@ def write_store_summary(payload: dict[str, Any], path: str | Path) -> Path:
 
 
 __all__ = [
-    "STORE_STATISTICS",
-    "summarize_store_file",
     "summarize_store_statistics",
-    "write_store_summary",
 ]

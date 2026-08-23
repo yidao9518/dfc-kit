@@ -4,7 +4,8 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from dfckit.artifacts import state_stability_payload, write_state_stability
+from dfckit.artifacts import write_state_stability
+from dfckit.artifacts.state_stability import _state_stability_payload
 from dfckit.states import RunStateStability, StateAlignment
 
 
@@ -53,7 +54,7 @@ def _metadata() -> dict[str, object]:
 
 class StateStabilityIOTests(unittest.TestCase):
     def test_payload_records_alignment_and_finite_statistics(self):
-        payload = state_stability_payload((_run(),), **_metadata())
+        payload = _state_stability_payload((_run(),), **_metadata())
         self.assertEqual(payload["fits"][0]["candidate_to_reference"], [0, 1])
         self.assertEqual(payload["fits"][1]["candidate_to_reference"], [1, 0])
         self.assertIn("ddof=0", payload["dispersion_standard_deviation"])
@@ -71,7 +72,7 @@ class StateStabilityIOTests(unittest.TestCase):
         mismatch = _metadata()
         mismatch["candidate_seeds"] = (31,)
         with self.assertRaisesRegex(ValueError, "seed identity"):
-            state_stability_payload((_run(),), **mismatch)
+            _state_stability_payload((_run(),), **mismatch)
 
 
 if __name__ == "__main__":

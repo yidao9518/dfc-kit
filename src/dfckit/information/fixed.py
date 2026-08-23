@@ -16,8 +16,8 @@ from .._validation import validated_integer as _integer
 from ..data import TimeSeriesDataset, TimeSeriesRun
 from .estimators import (
     FixedWindowSamples,
-    eligible_fixed_window_count,
-    estimate_fixed_windows,
+    _eligible_fixed_window_count,
+    _estimate_fixed_windows,
     sample_fixed_windows,
 )
 
@@ -497,7 +497,7 @@ def compute_fixed_information(
     for acquisition_index, run in enumerate(runs):
         acquisition_id = str(run.acquisition_id)
         for length in selected_lengths:
-            eligible = eligible_fixed_window_count(run, length)
+            eligible = _eligible_fixed_window_count(run, length)
             schedule_cell = (acquisition_id, length)
             if eligible == 0:
                 if schedule_cell in schedule_cells:
@@ -527,7 +527,7 @@ def compute_fixed_information(
                     eligible_starts=eligible,
                     sample_seed=sampling_seed,
                 )
-            result = estimate_fixed_windows(
+            result = _estimate_fixed_windows(
                 samples,
                 left,
                 right,

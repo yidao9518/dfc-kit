@@ -115,7 +115,7 @@ def _fit_records(
     return records
 
 
-def state_stability_payload(
+def _state_stability_payload(
     runs: Sequence[RunStateStability],
     *,
     model_kind: str,
@@ -198,13 +198,10 @@ def write_state_stability(
     **metadata: object,
 ) -> Path:
     """Atomically write an aligned repeated-fit stability report as strict JSON."""
-    payload = state_stability_payload(runs, **metadata)
+    payload = _state_stability_payload(runs, **metadata)
     return write_json_atomic(path, payload)
 
 
 __all__ = [
-    "FORMAT_NAME",
-    "FORMAT_VERSION",
-    "state_stability_payload",
     "write_state_stability",
 ]

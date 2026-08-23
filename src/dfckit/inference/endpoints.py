@@ -164,14 +164,14 @@ def infer_paired_endpoints(
     }
 
 
-def infer_paired_endpoints_file(path: str | Path, **kwargs: Any) -> dict[str, Any]:
+def _infer_paired_endpoints_file(path: str | Path, **kwargs: Any) -> dict[str, Any]:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise TypeError("endpoint input must be a JSON object")
     return infer_paired_endpoints(raw, **kwargs)
 
 
-def write_paired_endpoint_inference(payload: dict[str, Any], path: str | Path) -> Path:
+def _write_paired_endpoint_inference(payload: dict[str, Any], path: str | Path) -> Path:
     target = Path(path)
     if target.exists() or target.is_symlink():
         raise FileExistsError(f"endpoint-inference output already exists: {target}")
@@ -191,6 +191,4 @@ def write_paired_endpoint_inference(payload: dict[str, Any], path: str | Path) -
 
 __all__ = [
     "infer_paired_endpoints",
-    "infer_paired_endpoints_file",
-    "write_paired_endpoint_inference",
 ]

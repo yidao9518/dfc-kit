@@ -229,11 +229,11 @@ def infer_paired_state_metrics(
     }
 
 
-def infer_paired_state_metrics_file(path: str | Path, **kwargs: Any) -> dict[str, Any]:
+def _infer_paired_state_metrics_file(path: str | Path, **kwargs: Any) -> dict[str, Any]:
     return infer_paired_state_metrics(_load_metrics(path), **kwargs)
 
 
-def write_paired_state_inference(payload: dict[str, Any], path: str | Path) -> Path:
+def _write_paired_state_inference(payload: dict[str, Any], path: str | Path) -> Path:
     target = Path(path)
     if target.exists() or target.is_symlink():
         raise FileExistsError(f"state-inference output already exists: {target}")
@@ -274,6 +274,4 @@ def write_paired_state_inference(payload: dict[str, Any], path: str | Path) -> P
 __all__ = [
     "SUPPORTED_STATE_METRICS",
     "infer_paired_state_metrics",
-    "infer_paired_state_metrics_file",
-    "write_paired_state_inference",
 ]

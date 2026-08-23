@@ -9,7 +9,7 @@ from ._arrays import readonly_copy as _readonly
 from .data import TimeSeriesRun
 
 
-def segment_standardized_samples(
+def _segment_standardized_samples(
     run: TimeSeriesRun,
     *,
     method_name: str = "ETS",

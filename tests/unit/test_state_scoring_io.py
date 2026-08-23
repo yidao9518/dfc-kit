@@ -4,9 +4,9 @@ from tempfile import TemporaryDirectory
 
 from dfckit.artifacts import (
     load_state_model_scores,
-    state_model_scores_payload,
     write_state_model_scores,
 )
+from dfckit.artifacts.state_scoring import _state_model_scores_payload
 from dfckit.states import RunGaussianHMMScore, RunKMeansScore
 
 
@@ -53,7 +53,7 @@ class StateScoringIOTests(unittest.TestCase):
             RunKMeansScore("sub-010", "off", "run-1", 4, 1, 8.0, 2.0),
             RunKMeansScore("sub-011", "off", "run-1", 6, 2, 6.0, 1.0),
         )
-        payload = state_model_scores_payload(scores, **_metadata())
+        payload = _state_model_scores_payload(scores, **_metadata())
         self.assertEqual(payload["summary"]["mean_squared_distance"], 1.4)
 
     def test_hmm_payload_preserves_finite_likelihoods(self):
@@ -61,7 +61,7 @@ class StateScoringIOTests(unittest.TestCase):
             RunGaussianHMMScore("sub-010", None, None, 5, 2, -10.0, -2.0),
             RunGaussianHMMScore("sub-011", None, None, 5, 1, -15.0, -3.0),
         )
-        payload = state_model_scores_payload(scores, **_metadata("gaussian-hmm-state"))
+        payload = _state_model_scores_payload(scores, **_metadata("gaussian-hmm-state"))
         self.assertEqual(payload["summary"]["log_likelihood_per_sample"], -2.5)
 
     def test_roundtrip_and_duplicate_run_rejection(self):
@@ -74,12 +74,12 @@ class StateScoringIOTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 write_state_model_scores((score,), output, **_metadata())
         with self.assertRaisesRegex(ValueError, "duplicate run"):
-            state_model_scores_payload((score, score), **_metadata())
+            _state_model_scores_payload((score, score), **_metadata())
 
     def test_invalid_score_type_is_rejected(self):
         hmm = (RunGaussianHMMScore("sub-010", None, None, 4, 1, -8.0, -2.0),)
         with self.assertRaisesRegex(TypeError, "does not match"):
-            state_model_scores_payload(hmm, **_metadata())
+            _state_model_scores_payload(hmm, **_metadata())
 
 
 if __name__ == "__main__":

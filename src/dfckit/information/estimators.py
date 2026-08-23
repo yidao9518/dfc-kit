@@ -60,7 +60,7 @@ def _jitter_columns(
     return values + rng.normal(scale=magnitude * scale, size=values.shape)
 
 
-def zscore_columns(values: ArrayLike) -> NDArray[np.float64]:
+def _zscore_columns(values: ArrayLike) -> NDArray[np.float64]:
     """Center and population-SD scale every column independently."""
     data = np.asarray(values, dtype=float)
     if data.ndim != 2 or data.shape[0] < 2 or data.shape[1] < 1:
@@ -245,7 +245,7 @@ def block_information(
                 f"overlap={condition_overlap}"
             )
 
-    transformed = zscore_columns(data) if standardize else data
+    transformed = _zscore_columns(data) if standardize else data
     condition_signal = (
         None if condition_nodes is None else transformed[:, condition_nodes].mean(axis=1)
     )
@@ -306,7 +306,7 @@ class FixedWindowSamples:
     acquisition_id: str | None = None
 
 
-def eligible_fixed_window_count(run: TimeSeriesRun, length: int) -> int:
+def _eligible_fixed_window_count(run: TimeSeriesRun, length: int) -> int:
     """Count every fixed-length start wholly contained in a retained segment."""
     if not isinstance(run, TimeSeriesRun):
         raise TypeError("run must be a TimeSeriesRun")
@@ -392,7 +392,7 @@ class FixedLengthInformationResult:
     implementation: str
 
 
-def estimate_fixed_windows(
+def _estimate_fixed_windows(
     samples: FixedWindowSamples,
     left: Iterable[int],
     right: Iterable[int],
@@ -523,7 +523,7 @@ class FixedLengthInformation:
             self.draws,
             seed=self.sample_seed,
         )
-        return estimate_fixed_windows(
+        return _estimate_fixed_windows(
             samples=samples,
             left=left,
             right=right,

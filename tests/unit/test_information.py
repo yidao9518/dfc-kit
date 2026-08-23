@@ -7,11 +7,11 @@ from dfckit import TimeSeriesRun
 from dfckit.information import (
     FixedLengthInformation,
     block_information,
-    eligible_fixed_window_count,
     knn_cmi,
     knn_mi,
     sample_fixed_windows,
 )
+from dfckit.information.estimators import _eligible_fixed_window_count
 
 SCIPY_AVAILABLE = importlib.util.find_spec("scipy") is not None
 
@@ -32,7 +32,7 @@ class FixedWindowSamplingTests(unittest.TestCase):
     def test_exact_length_and_censor_gap_are_preserved(self):
         sampled = sample_fixed_windows(self.run, length=120, draws=200, seed=7)
 
-        self.assertEqual(eligible_fixed_window_count(self.run, 120), 31 + 81)
+        self.assertEqual(_eligible_fixed_window_count(self.run, 120), 31 + 81)
         self.assertEqual(sampled.values.shape, (200, 120, 1))
         self.assertEqual(sampled.original_indices.shape, (200, 120))
         self.assertEqual(sampled.draw_indices.tolist(), list(range(200)))

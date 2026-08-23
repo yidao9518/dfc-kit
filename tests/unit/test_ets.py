@@ -6,9 +6,8 @@ from dfckit import TimeSeriesRun
 from dfckit.connectivity import (
     ETS,
     InstantaneousEdgeResult,
-    edge_products,
-    edge_rss,
 )
+from dfckit.connectivity._edge_products import edge_products, edge_rss
 
 
 def make_run(subject="sub-001", session="off"):

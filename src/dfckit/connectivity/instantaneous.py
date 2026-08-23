@@ -16,8 +16,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .._arrays import readonly_copy as _readonly
+from .._preprocessing import _segment_standardized_samples
 from ..data import TimeSeriesRun
-from ..preprocessing import segment_standardized_samples
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ class ETS(_InstantaneousEstimator):
     """Instantaneous edge products from segment-standardized BOLD values."""
 
     def _rows(self, run: TimeSeriesRun) -> _InstantaneousRows:
-        values, indices, segments = segment_standardized_samples(run, method_name="ETS")
+        values, indices, segments = _segment_standardized_samples(run, method_name="ETS")
         return _InstantaneousRows(
             values=values,
             starts=indices,

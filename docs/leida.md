@@ -43,9 +43,10 @@ Eigenvector sign is arbitrary. Each vector is deterministically multiplied by
 `-1` when its element sum is negative, producing the
 `positive-vector-sum` orientation used by the reference analysis.
 
-`within_block_phase_coherence` and `cross_block_phase_coherence` calculate
-predefined phase-coherence summaries directly from the phase array. They do
-not infer network blocks.
+The returned phase array can also support predefined within-network and
+between-network coherence summaries without reconstructing every full
+ROI-by-ROI matrix. Network membership must be supplied by the analysis; LEiDA
+does not infer network blocks.
 
 ## State modeling
 
