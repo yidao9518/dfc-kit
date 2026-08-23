@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ._validation import validated_subject_ids
+from .._validation import validated_subject_ids
 
 
 @dataclass(frozen=True)

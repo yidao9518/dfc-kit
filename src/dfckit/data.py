@@ -9,6 +9,7 @@ from types import MappingProxyType
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from ._arrays import readonly_copy
 from .segments import contiguous_segments, window_positions
 
 
@@ -61,12 +62,8 @@ class TimeSeriesRun:
         if self.acquisition_id is not None and not str(self.acquisition_id).strip():
             raise ValueError("acquisition_id cannot be empty")
 
-        values = values.copy()
-        original_indices = original_indices.copy()
-        values.setflags(write=False)
-        original_indices.setflags(write=False)
-        object.__setattr__(self, "values", values)
-        object.__setattr__(self, "original_indices", original_indices)
+        object.__setattr__(self, "values", readonly_copy(values))
+        object.__setattr__(self, "original_indices", readonly_copy(original_indices))
         object.__setattr__(self, "roi_names", roi_names)
         object.__setattr__(
             self,

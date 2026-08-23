@@ -21,6 +21,24 @@ class NBSComponentTests(unittest.TestCase):
             np.all(statistics[list(components["negative"][0].edge_indices)] <= -2.0)
         )
 
+    def test_pooled_mode_joins_adjacent_opposite_sign_edges(self):
+        edge_i, edge_j = np.triu_indices(4, 1)
+        statistics = np.asarray([3.2, -3.1, 0.0, 3.4, 0.0, -4.0])
+
+        components = threshold_components(
+            statistics,
+            edge_i,
+            edge_j,
+            4,
+            2.0,
+            component_sign_mode="pooled",
+        )
+
+        self.assertEqual(tuple(components), ("pooled",))
+        self.assertEqual(components["pooled"][0].direction, "pooled")
+        self.assertEqual(components["pooled"][0].node_indices, (0, 1, 2, 3))
+        self.assertEqual(components["pooled"][0].edge_indices, (0, 1, 3, 5))
+
     def test_edge_extent_and_intensity_have_explicit_different_rankings(self):
         edge_i, edge_j = np.triu_indices(7, 1)
         lookup = {
@@ -54,6 +72,20 @@ class NBSComponentTests(unittest.TestCase):
             threshold_components([3.0, 4.0], [0, 0], [1, 1], 3, 2.0)
         with self.assertRaisesRegex(ValueError, "edge_i < edge_j"):
             threshold_components([3.0], [1], [0], 3, 2.0)
+        with self.assertRaisesRegex(ValueError, "component_sign_mode"):
+            threshold_components(
+                [3.0], [0], [1], 2, 2.0, component_sign_mode="unknown"
+            )
+
+    def test_edges_exactly_at_cutoff_are_not_suprathreshold(self):
+        edge_i, edge_j = np.triu_indices(3, 1)
+
+        components = threshold_components(
+            [2.0, -2.0, 2.000001], edge_i, edge_j, 3, 2.0
+        )
+
+        self.assertEqual(components["negative"], ())
+        self.assertEqual(components["positive"][0].edge_indices, (2,))
 
 
 class PairedNBSTests(unittest.TestCase):
@@ -96,6 +128,56 @@ class PairedNBSTests(unittest.TestCase):
             self.assertEqual(observed.components, repeated.components)
         self.assertEqual(first.permutation_unit, "participant complete edge vector")
         self.assertIn("no correction", first.threshold_correction)
+
+    def test_explicit_separate_mode_matches_default(self):
+        default = self._run()
+        explicit = self._run(component_sign_mode="separate")
+
+        self.assertEqual(default.component_sign_mode, "separate")
+        for threshold in (2.0, 2.5):
+            default_threshold = default.at_threshold(threshold)
+            explicit_threshold = explicit.at_threshold(threshold)
+            self.assertEqual(default_threshold.components, explicit_threshold.components)
+            self.assertEqual(default_threshold.pooled_components, ())
+            self.assertIsNone(default_threshold.null_pooled)
+            np.testing.assert_array_equal(
+                default_threshold.null_maximum, explicit_threshold.null_maximum
+            )
+
+    def test_pooled_mode_has_its_own_null_and_plus_one_pvalues(self):
+        pooled_result = self._run(
+            thresholds=(1.5,), component_sign_mode="pooled"
+        )
+        pooled = pooled_result.at_threshold(1.5)
+        separate = self._run(thresholds=(1.5,)).at_threshold(1.5)
+
+        self.assertEqual(pooled.component_sign_mode, "pooled")
+        self.assertIn("pooled", pooled_result.threshold_correction)
+        self.assertEqual(pooled.positive_components, ())
+        self.assertEqual(pooled.negative_components, ())
+        self.assertIsNone(pooled.null_positive)
+        self.assertIsNone(pooled.null_negative)
+        np.testing.assert_array_equal(pooled.null_maximum, pooled.null_pooled)
+        self.assertTrue(
+            np.all(pooled.null_maximum >= separate.null_maximum)
+        )
+        self.assertTrue(np.any(pooled.null_maximum > separate.null_maximum))
+        for component in pooled.components:
+            expected = (
+                1
+                + np.count_nonzero(
+                    pooled.null_maximum >= component.statistic_value
+                )
+            ) / 81
+            self.assertEqual(component.direction, "pooled")
+            self.assertEqual(component.fwe_pvalue, expected)
+
+    def test_pooled_mode_rejects_one_sided_alternatives(self):
+        for alternative in ("greater", "less"):
+            with self.subTest(alternative=alternative), self.assertRaisesRegex(
+                ValueError, "requires"
+            ):
+                self._run(component_sign_mode="pooled", alternative=alternative)
 
     def test_one_sided_tail_uses_only_requested_direction(self):
         greater = self._run(alternative="greater")

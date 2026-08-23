@@ -11,7 +11,7 @@ python -m pip install dfc-kit
 Install method-specific extras as needed:
 
 ```bash
-python -m pip install 'dfc-kit[phase,states,hmm,information,qc]'
+python -m pip install 'dfc-kit[phase,states,hmm,information,inference]'
 ```
 
 Fixed-partition graph metrics are included in the core NumPy-only package.

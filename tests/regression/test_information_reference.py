@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from dfckit import TimeSeriesRun
-from dfckit.connectivity import block_information, knn_cmi, knn_mi, sample_fixed_windows
+from dfckit.information import block_information, knn_cmi, knn_mi, sample_fixed_windows
 
 SCIPY_AVAILABLE = importlib.util.find_spec("scipy") is not None
 

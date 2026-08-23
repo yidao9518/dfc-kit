@@ -46,7 +46,7 @@ states = [
 phase = [
   "scipy>=1.10",
 ]
-qc = [
+inference = [
   "scipy>=1.10",
 ]
 hmm = [

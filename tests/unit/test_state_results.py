@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from dfckit.io import (
+from dfckit.artifacts import (
     StatePredictions,
     load_state_predictions,
     save_state_predictions,
@@ -49,7 +49,6 @@ class StateResultPersistenceTests(unittest.TestCase):
             assignments=_assignments(),
             model_kind="kmeans-state",
             model_seed=17,
-            model_fingerprint="a" * 64,
         )
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -84,7 +83,6 @@ class StateResultPersistenceTests(unittest.TestCase):
             assignments=assignments,
             model_kind="gaussian-hmm-state",
             model_seed=19,
-            model_fingerprint="b" * 64,
             posterior_probabilities=posterior,
             log_likelihood=-12.5,
         )
@@ -102,7 +100,6 @@ class StateResultPersistenceTests(unittest.TestCase):
                 assignments=_assignments(),
                 model_kind="gaussian-hmm-state",
                 model_seed=19,
-                model_fingerprint="b" * 64,
                 posterior_probabilities=(np.ones((4, 2)), np.ones((3, 2))),
                 log_likelihood=-1.0,
             )
@@ -112,20 +109,18 @@ class StateResultPersistenceTests(unittest.TestCase):
                 assignments=_assignments(),
                 model_kind="kmeans-state",
                 model_seed=17,
-                model_fingerprint="a" * 64,
             )
             save_state_predictions(predictions, target)
             with self.assertRaises(FileExistsError):
                 save_state_predictions(predictions, target)
 
-    def test_v1_artifact_without_model_seed_remains_readable(self):
+    def test_legacy_artifact_is_rejected(self):
         with TemporaryDirectory() as temporary:
             target = save_state_predictions(
                 StatePredictions(
                     assignments=_assignments(),
                     model_kind="kmeans-state",
                     model_seed=17,
-                    model_fingerprint="a" * 64,
                 ),
                 Path(temporary) / "labels",
             )
@@ -133,33 +128,23 @@ class StateResultPersistenceTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest["format_version"] = 1
             del manifest["model_seed"]
-            del manifest["model_fingerprint"]
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-            restored = load_state_predictions(target)
-            self.assertIsNone(restored.model_seed)
-            self.assertEqual(restored.subjects, ("sub-001", "sub-002"))
+            with self.assertRaisesRegex(ValueError, "schema|unsupported"):
+                load_state_predictions(target)
 
-    def test_writer_uses_the_highest_supported_identity_version(self):
+    def test_writer_records_current_model_seed(self):
         with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            cases = (
-                (None, None, 1),
-                (17, None, 2),
-                (17, "a" * 64, 3),
+            target = save_state_predictions(
+                StatePredictions(
+                    assignments=_assignments(),
+                    model_kind="kmeans-state",
+                    model_seed=17,
+                ),
+                Path(temporary) / "labels",
             )
-            for index, (seed, fingerprint, expected_version) in enumerate(cases):
-                target = save_state_predictions(
-                    StatePredictions(
-                        assignments=_assignments(),
-                        model_kind="kmeans-state",
-                        model_seed=seed,
-                        model_fingerprint=fingerprint,
-                    ),
-                    root / f"labels-{index}",
-                )
-                manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
-                self.assertEqual(manifest["format_version"], expected_version)
-                self.assertEqual(load_state_predictions(target).model_fingerprint, fingerprint)
+            manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["format_version"], 4)
+            self.assertEqual(load_state_predictions(target).model_seed, 17)
 
 
 if __name__ == "__main__":

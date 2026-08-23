@@ -16,25 +16,23 @@ nav:
       - Architecture: architecture.md
   - Connectivity methods:
       - Correlation and sliding-window FC: correlation.md
-      - MTD: mtd.md
-      - ETS: ets.md
+      - Instantaneous edges (ETS and MTD): instantaneous_edges.md
       - LEiDA: leida.md
       - Low-rank covariance: lowrank.md
       - Information: information.md
-  - Network and state methods:
       - Partition graphs: partition_graphs.md
+  - State methods:
       - State models: states.md
       - State alignment: state_alignment.md
       - Repeated-fit stability: state_stability.md
       - Held-out model scoring: state_scoring.md
       - State-count selection: state_selection.md
-      - Nested state-count validation: nested_cross_validation.md
       - Gaussian HMM: hmm.md
       - Healthy references: reference.md
-  - Inference and QC:
+  - Inference:
       - Paired inference: inference.md
-      - Experimental NBS: nbs.md
-      - Motion matching: qc_matching.md
+      - Paired NBS: nbs.md
+      - Covariate matching: inference_matching.md
   - Tutorials:
       - XCP-D to states: tutorial_xcpd_to_states.md
   - API map: api.md

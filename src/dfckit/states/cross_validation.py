@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
@@ -59,15 +57,6 @@ class SubjectValidationFold:
         object.__setattr__(self, "evaluation_subjects", evaluation_subjects)
 
 
-def _split_key(subject: str, seed: int) -> bytes:
-    payload = json.dumps(
-        {"seed": seed, "subject": subject},
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).digest()
-
-
 def make_subject_validation_folds(
     subjects: Sequence[str],
     *,
@@ -76,11 +65,10 @@ def make_subject_validation_folds(
 ) -> tuple[SubjectValidationFold, ...]:
     """Create balanced, reproducible, participant-exclusive validation folds.
 
-    Subjects are ranked by a SHA-256 digest of the split seed and subject label,
-    then divided into contiguous balanced groups. The hash-based assignment is
-    independent of NumPy's random-number implementation and input ordering.
+    Subjects are randomly permuted with the supplied seed and divided into
+    contiguous balanced groups.
     """
-    cohort = tuple(_subject_label(value) for value in subjects)
+    cohort = tuple(sorted(_subject_label(value) for value in subjects))
     if len(set(cohort)) != len(cohort):
         raise ValueError("cross-validation subjects must be unique")
     if (
@@ -93,9 +81,8 @@ def make_subject_validation_folds(
     if len(cohort) < n_folds:
         raise ValueError("n_folds cannot exceed the number of subjects")
     split_seed = _nonnegative_seed(seed)
-    ranked = tuple(
-        sorted(cohort, key=lambda subject: (_split_key(subject, split_seed), subject))
-    )
+    rng = np.random.default_rng(split_seed)
+    ranked = tuple(cohort[index] for index in rng.permutation(len(cohort)))
     base_size, remainder = divmod(len(ranked), n_folds)
     evaluation_groups = []
     offset = 0

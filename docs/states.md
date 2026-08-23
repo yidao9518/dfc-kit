@@ -32,10 +32,44 @@ fit = fit_kmeans_states(
 )
 ```
 
-Window FC features are pooled across the supplied training participants,
-standardized feature by feature, and fitted with scikit-learn Lloyd KMeans.
-The model stores its seed, fitted participant IDs, scaler, centroids, feature
-identity, source contract, and implementation version.
+Window FC features are pooled across the supplied training participants and
+standardized feature by feature. By default, scikit-learn KMeans is fitted
+directly in the original edge-feature space:
+
+```text
+window FC edges -> training-set feature scaling -> KMeans
+```
+
+For a lower-dimensional sensitivity path, set `n_pca_components`. PCA is fitted
+only on the training participants, and the frozen scaler and PCA basis are
+applied before KMeans:
+
+```text
+window FC edges -> training-set feature scaling -> PCA -> KMeans
+```
+
+The model stores both the clustering-space centres and their inverse-mapped
+centres in the original feature space. The latter are used for state
+interpretation and alignment; the former are used for prediction and scoring.
+The model also stores the PCA basis and explained-variance ratios.
+
+```python
+direct = fit_kmeans_states(
+    training_sequences,
+    n_states=4,
+    seed=20260818,
+)
+pca = fit_kmeans_states(
+    training_sequences,
+    n_states=4,
+    seed=20260818,
+    n_pca_components=30,
+)
+```
+
+The two fits define different state geometries and should be compared as
+separate analysis specifications. PCA is not fitted again on held-out
+participants.
 
 Held-out prediction rejects participant overlap by default:
 
@@ -48,7 +82,7 @@ test_assignments = predict_kmeans_states(fit.model, test_sequences)
 For large persisted feature matrices, use the out-of-core equivalent:
 
 ```python
-from dfckit.outofcore import fit_minibatch_kmeans_store, predict_kmeans_store
+from dfckit.states.streaming import fit_minibatch_kmeans_store, predict_kmeans_store
 from dfckit.storage import FeatureStore
 
 fit = fit_minibatch_kmeans_store(
@@ -65,7 +99,7 @@ uniform-row k-means++ initialization, and participant-safe prediction. It
 does not materialize a `FeatureSequenceDataset` during fitting.
 
 The same store boundary is available for Gaussian HMMs through
-`dfckit.outofcore_hmm`. It first learns IncrementalPCA on eligible sequences,
+`dfckit.states.streaming_hmm`. It first learns IncrementalPCA on eligible sequences,
 then passes only reduced observations and their explicit lengths to
 `hmmlearn`; see `docs/hmm.md` for the full example.
 
@@ -97,6 +131,9 @@ CAP input consists of instantaneous ROI patterns. Each uninterrupted retained
 segment is centered and scaled ROI by ROI before fitting. The CAP wrapper uses
 MiniBatchKMeans and does not apply a second pooled feature standardization.
 CAP centroids are co-activation patterns, not connectivity matrices.
+Use `align_cap_centroids` to align repeated CAP fits. Its default is Pearson
+pattern matching; generic KMeans and HMM alignment continues to default to
+standardized Euclidean distance.
 
 For a disk-backed XCP-D cohort, build the equivalent CAP FeatureStore with
 `dfc-kit build-store --method cap` or `write_cap_store`. The store uses the
@@ -187,10 +224,13 @@ aligned = apply_state_alignment(candidate_assignments, alignment)
 aligned_model = relabel_kmeans_model(candidate_model, alignment)
 ```
 
-States are matched one to one with Hungarian assignment that maximizes Pearson
-correlation between centroid patterns in the common original feature space.
-The mapping runs from candidate labels to reference labels and stores the full
-correlation matrix plus every matched correlation.
+States are matched one to one with Hungarian assignment. The default metric is
+standardized Euclidean distance between centroid patterns in the common
+original feature space; it minimizes total whole-network distance and stores
+the full cost matrix plus every matched cost. Pass `metric="pearson"` to use
+`1 - r` instead when proportional pattern shape, rather than amplitude, is the
+intended similarity criterion. The mapping runs from candidate labels to
+reference labels.
 
 Gaussian HMM fits use `align_gaussian_hmm_emissions`,
 `apply_gaussian_hmm_alignment`, and `relabel_gaussian_hmm_model`. HMM model

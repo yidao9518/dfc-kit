@@ -5,15 +5,15 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from dfckit.io import load_fitted_model, save_fitted_model
-from dfckit.outofcore import (
+from dfckit.artifacts import load_fitted_model, save_fitted_model
+from dfckit.states import FeatureSequence, FeatureSequenceDataset
+from dfckit.states.streaming import (
     fit_incremental_pca_store,
     fit_minibatch_kmeans_store,
     iter_pca_store_chunks,
     predict_kmeans_store,
 )
-from dfckit.outofcore_hmm import fit_gaussian_hmm_store, predict_gaussian_hmm_store
-from dfckit.states import FeatureSequence, FeatureSequenceDataset
+from dfckit.states.streaming_hmm import fit_gaussian_hmm_store, predict_gaussian_hmm_store
 from dfckit.storage import FeatureStore
 
 HAS_MODEL_EXTRAS = (

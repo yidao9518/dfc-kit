@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from dfckit.cli import main
-from dfckit.io import load_fixed_information
+from dfckit.information import load_fixed_information
 
 
 def write_tsv(path: Path, header: list[str], rows: list[list[object]]) -> None:
@@ -103,15 +103,21 @@ class XCPDInformationIntegrationTests(unittest.TestCase):
             sampled = load_fixed_information(output)
 
             schedule = Path(temporary) / "schedule.tsv"
-            with (output / "draw_metrics.tsv").open(
-                "r", encoding="utf-8", newline=""
-            ) as source, schedule.open("w", encoding="utf-8", newline="") as target:
-                reader = csv.DictReader(source, delimiter="\t")
+            with schedule.open("w", encoding="utf-8", newline="") as target:
                 fields = ["acquisition_id", "length", "draw", "start_frame", "end_frame"]
                 writer = csv.DictWriter(target, fieldnames=fields, delimiter="\t", lineterminator="\n")
                 writer.writeheader()
-                for row in reader:
-                    writer.writerow({field: row[field] for field in fields})
+                for row in range(sampled.n_draws):
+                    acquisition = sampled.acquisitions[int(sampled.acquisition_index[row])]
+                    writer.writerow(
+                        {
+                            "acquisition_id": acquisition.acquisition_id,
+                            "length": int(sampled.length[row]),
+                            "draw": int(sampled.draw[row]),
+                            "start_frame": int(sampled.start_frame[row]),
+                            "end_frame": int(sampled.end_frame[row]),
+                        }
+                    )
 
             replay_output = Path(temporary) / "replayed"
             with contextlib.redirect_stdout(io.StringIO()):

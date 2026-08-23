@@ -6,6 +6,14 @@ from .endpoints import (
     write_paired_endpoint_inference,
 )
 from .hc3 import HC3Result, PairedHC3Result, ols_hc3, paired_hc3
+from .matching import (
+    MatchedSubjectDifferences,
+    WindowMotionSummary,
+    WithinSubjectMatchResult,
+    match_within_subject,
+    matched_subject_differences,
+    summarize_window_motion,
+)
 from .multiple_testing import FDRResult, benjamini_hochberg
 from .nbs import (
     NBSComponent,
@@ -21,11 +29,6 @@ from .paired import (
     paired_bootstrap_mean_ci,
     paired_sign_flip,
 )
-from .result_families import (
-    adjust_result_families,
-    adjust_result_families_file,
-    write_adjusted_result_families,
-)
 from .state_metrics import (
     SUPPORTED_STATE_METRICS,
     infer_paired_state_metrics,
@@ -38,26 +41,29 @@ __all__ = [
     "BootstrapCIResult",
     "FDRResult",
     "HC3Result",
+    "MatchedSubjectDifferences",
     "NBSComponent",
     "NBSThresholdResult",
     "PairedHC3Result",
     "PairedNBSResult",
     "PairedSignFlipResult",
-    "adjust_result_families",
-    "adjust_result_families_file",
+    "WindowMotionSummary",
+    "WithinSubjectMatchResult",
     "benjamini_hochberg",
     "infer_paired_endpoints",
     "infer_paired_endpoints_file",
     "infer_paired_state_metrics",
     "infer_paired_state_metrics_file",
     "intercept_t_statistic",
+    "match_within_subject",
+    "matched_subject_differences",
     "ols_hc3",
     "paired_bootstrap_mean_ci",
     "paired_hc3",
     "paired_nbs",
     "paired_sign_flip",
+    "summarize_window_motion",
     "threshold_components",
-    "write_adjusted_result_families",
     "write_paired_endpoint_inference",
     "write_paired_state_inference",
 ]

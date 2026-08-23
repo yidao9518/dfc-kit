@@ -20,14 +20,14 @@ The toolkit is organized around four public layers:
 
 - **Data and topology:** XCP-D discovery, ROI loading, retained-frame
   reconstruction, acquisition identity, and censor-bounded sequences.
-- **Connectivity and networks:** sliding-window FC, MTD, ETS, LEiDA, low-rank
-  geometry, MI/CMI, partition metrics, and healthy-reference utilities.
+- **Connectivity:** sliding-window FC, one instantaneous-edge
+  pipeline with ETS and MTD sample generators, LEiDA, low-rank geometry,
+  MI/CMI, partition metrics, and healthy-reference utilities.
 - **State models:** CAP, KMeans, Gaussian HMMs, state alignment, held-out
   scoring, repeated-fit stability, and participant-disjoint state-count
-  selection, including nested validation.
-- **Inference and persistence:** paired inference, motion matching,
-  experimental NBS, memory-mapped FeatureStores, portable model artifacts, and
-  provenance-aware prediction records.
+  selection.
+- **Inference and persistence:** paired inference, covariate matching,
+  paired NBS, memory-mapped FeatureStores, and portable model artifacts.
 
 ## Scope
 

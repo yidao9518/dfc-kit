@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from dfckit.networks import (
+from dfckit.connectivity import (
     FixedPartitionGraph,
     achieved_density,
     fixed_partition_modularity,

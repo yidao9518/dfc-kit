@@ -5,7 +5,8 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from dfckit.outofcore import (
+from dfckit.states import FeatureSequence, FeatureSequenceDataset, fit_kmeans_states
+from dfckit.states.streaming import (
     fit_incremental_pca_store,
     fit_kmeans_store_materialized,
     fit_minibatch_kmeans_store,
@@ -13,7 +14,6 @@ from dfckit.outofcore import (
     predict_kmeans_store,
     score_kmeans_store,
 )
-from dfckit.states import FeatureSequence, FeatureSequenceDataset, fit_kmeans_states
 from dfckit.storage import FeatureStore
 
 HAS_STATES_EXTRA = importlib.util.find_spec("sklearn") is not None
@@ -99,10 +99,6 @@ class StreamingKMeansTests(StreamingStoreMixin, unittest.TestCase):
                 np.concatenate([item.labels for item in expected.assignments.sequences]),
             )
             self.assertAlmostEqual(observed.model.inertia, expected.model.inertia, places=14)
-            self.assertEqual(
-                observed.model.training_data_fingerprint,
-                store.data_fingerprint(subjects=subjects),
-            )
             self.assertIn("materialized FeatureStore fit", observed.model.implementation)
 
     def test_standardization_is_streaming_and_fit_is_deterministic(self):
@@ -158,6 +154,56 @@ class StreamingKMeansTests(StreamingStoreMixin, unittest.TestCase):
                 atol=1e-12,
             )
             self.assertAlmostEqual(left_fit.model.inertia, right_fit.model.inertia, places=10)
+
+    def test_pca_kmeans_is_chunk_invariant_and_scores_in_reduced_space(self):
+        with TemporaryDirectory() as temporary:
+            left = self._store(Path(temporary) / "left", chunk_size=2)
+            right = self._store(Path(temporary) / "right", chunk_size=11)
+            options = {
+                "subjects": ("sub-000", "sub-001", "sub-002"),
+                "n_states": 2,
+                "seed": 9,
+                "n_init": 2,
+                "max_iter": 3,
+                "batch_size": 8,
+                "n_pca_components": 2,
+                "pca_batch_size": 13,
+            }
+            left_fit = fit_minibatch_kmeans_store(left, **options)
+            right_fit = fit_minibatch_kmeans_store(right, **options)
+
+            np.testing.assert_allclose(
+                left_fit.model.pca_components,
+                right_fit.model.pca_components,
+                rtol=1e-12,
+                atol=1e-12,
+            )
+            np.testing.assert_allclose(
+                left_fit.model.clustering_centers,
+                right_fit.model.clustering_centers,
+                rtol=1e-12,
+                atol=1e-12,
+            )
+            score = score_kmeans_store(
+                left_fit.model,
+                left,
+                subjects=("sub-003",),
+            )[0]
+            held_out = left.read_dataset(subjects=("sub-003",)).sequences[0]
+            standardized = (
+                held_out.values - left_fit.model.feature_mean
+            ) / left_fit.model.feature_scale
+            reduced = (
+                standardized - left_fit.model.pca_mean
+            ) @ left_fit.model.pca_components.T
+            distances = np.square(
+                reduced[:, None, :]
+                - left_fit.model.clustering_centers[None, :, :]
+            ).sum(axis=2)
+            self.assertAlmostEqual(
+                score.total_squared_distance,
+                float(np.min(distances, axis=1).sum()),
+            )
 
     def test_prediction_matches_direct_center_distance_and_rejects_overlap(self):
         with TemporaryDirectory() as temporary:

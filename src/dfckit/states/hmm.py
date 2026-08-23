@@ -7,13 +7,13 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from .._arrays import readonly_copy as _readonly
 from .data import (
     FeatureKey,
     FeatureSequence,
     FeatureSequenceDataset,
     StateAssignments,
     StateLabelSequence,
-    _readonly,
 )
 
 
@@ -54,7 +54,6 @@ class GaussianHMMStateModel:
     fit_sample_count: int
     fit_sequence_count: int
     omitted_short_sequence_count: int
-    training_data_fingerprint: str | None
     implementation: str
 
 
@@ -364,7 +363,6 @@ def fit_gaussian_hmm_states(
         fit_sample_count=len(reduced_observations),
         fit_sequence_count=len(sequences),
         omitted_short_sequence_count=len(dataset.sequences) - len(sequences),
-        training_data_fingerprint=None,
         implementation=(
             f"hmmlearn {hmmlearn.__version__} GaussianHMM; "
             f"scikit-learn {sklearn.__version__} PCA"

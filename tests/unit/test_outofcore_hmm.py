@@ -5,13 +5,13 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from dfckit.outofcore_hmm import (
+from dfckit.states import FeatureSequence, FeatureSequenceDataset
+from dfckit.states.hmm import _reconstruct_estimator, reconstruct_emission_covariance
+from dfckit.states.streaming_hmm import (
     fit_gaussian_hmm_store,
     predict_gaussian_hmm_store,
     score_gaussian_hmm_store,
 )
-from dfckit.states import FeatureSequence, FeatureSequenceDataset
-from dfckit.states.hmm import _reconstruct_estimator, reconstruct_emission_covariance
 from dfckit.storage import FeatureStore
 
 HAS_HMM_EXTRA = (
@@ -93,13 +93,6 @@ class StreamingGaussianHMMTests(unittest.TestCase):
             self.assertEqual(fit.model.fit_sequence_count, 3)
             self.assertEqual(fit.model.omitted_short_sequence_count, 1)
             self.assertEqual(fit.model.pca_batch_size, 17)
-            self.assertEqual(
-                fit.model.training_data_fingerprint,
-                store.data_fingerprint(
-                    subjects=("sub-000", "sub-001", "sub-002"),
-                    minimum_sequence_length=2,
-                ),
-            )
             self.assertEqual(len(fit.states.assignments.sequences), 3)
             self.assertIn("IncrementalPCA", fit.model.implementation)
             self.assertIsNone(fit.model.emission_covariances)

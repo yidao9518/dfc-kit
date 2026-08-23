@@ -16,10 +16,10 @@ import numpy as np
 
 from dfckit import TimeSeriesRun
 from dfckit.connectivity import ETS, LowRankCovariance, SlidingWindowFC
-from dfckit.outofcore import fit_minibatch_kmeans_store
-from dfckit.outofcore_hmm import fit_gaussian_hmm_store
+from dfckit.states.streaming import fit_minibatch_kmeans_store
+from dfckit.states.streaming_hmm import fit_gaussian_hmm_store
 from dfckit.states import fit_kmeans_states, window_fc_sequences
-from dfckit.storage import write_ets_store, write_window_fc_store
+from dfckit.storage import write_instantaneous_edge_store, write_window_fc_store
 
 
 def peak_rss_mib() -> float:
@@ -108,9 +108,7 @@ def main() -> None:
     temporary: TemporaryDirectory[str] | None = None
     prepared = None
     if args.method == "window-kmeans-memory":
-        prepared = window_fc_sequences(
-            (SlidingWindowFC(args.length, args.step).transform(run),)
-        )
+        prepared = window_fc_sequences((SlidingWindowFC(args.length, args.step).transform(run),))
     elif args.method in {"window-kmeans-store", "window-hmm-store"}:
         temporary = TemporaryDirectory()
         prepared = write_window_fc_store(
@@ -145,9 +143,10 @@ def main() -> None:
         n_features = result.features.shape[1]
     elif args.method == "ets-store":
         temporary = TemporaryDirectory()
-        result = write_ets_store(
+        result = write_instantaneous_edge_store(
             Path(temporary.name) / "features",
             (run,),
+            ETS(),
             chunk_size=32,
         )
         n_samples = result.n_samples
@@ -208,9 +207,10 @@ def main() -> None:
     traced_current, traced_peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     if temporary is not None:
-        storage_mib = sum(
-            path.stat().st_size for path in Path(temporary.name).rglob("*") if path.is_file()
-        ) / 1024.0**2
+        storage_mib = (
+            sum(path.stat().st_size for path in Path(temporary.name).rglob("*") if path.is_file())
+            / 1024.0**2
+        )
     payload = {
         "method": args.method,
         "frames": args.frames,

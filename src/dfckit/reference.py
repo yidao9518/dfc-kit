@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from ._arrays import readonly_copy as _readonly
+from ._validation import validated_subject_labels
 from .connectivity.lowrank import (
     mean_projector_basis,
     subspace_distance,
@@ -15,21 +17,6 @@ from .connectivity.lowrank import (
 )
 
 FeatureKey = tuple[str, ...]
-
-
-def _readonly(values: NDArray) -> NDArray:
-    output = np.asarray(values).copy()
-    output.setflags(write=False)
-    return output
-
-
-def _validated_subjects(subjects: Iterable[str], *, n_observations: int) -> tuple[str, ...]:
-    output = tuple(str(subject) for subject in subjects)
-    if len(output) != n_observations:
-        raise ValueError("subjects must contain one identifier per observation")
-    if any(not subject.strip() for subject in output):
-        raise ValueError("subject identifiers must be non-empty")
-    return output
 
 
 def _validated_feature_values(values: ArrayLike) -> NDArray[np.float64]:
@@ -152,7 +139,7 @@ def fit_feature_reference(
 ) -> FeatureReferenceModel:
     """Fit an equal-participant-weight feature template."""
     data = _validated_feature_values(values)
-    identifiers = _validated_subjects(subjects, n_observations=len(data))
+    identifiers = validated_subject_labels(subjects, n_observations=len(data))
     keys = _validated_feature_keys(feature_keys, n_features=data.shape[1])
     fit_subjects, groups = _subject_groups(identifiers)
     if len(fit_subjects) < 2:
@@ -197,7 +184,7 @@ def score_feature_reference(
 ) -> NDArray[np.float64]:
     """Score observations against a fixed subject-balanced feature template."""
     data = _validated_feature_values(values)
-    identifiers = _validated_subjects(subjects, n_observations=len(data))
+    identifiers = validated_subject_labels(subjects, n_observations=len(data))
     keys = _validated_feature_keys(feature_keys, n_features=data.shape[1])
     if keys != model.feature_keys:
         raise ValueError("reference model and values use different feature identities or order")
@@ -217,7 +204,7 @@ def leave_one_subject_out_feature_similarity(
 ) -> NDArray[np.float64]:
     """Score fitted-participant observations against templates excluding that participant."""
     data = _validated_feature_values(values)
-    identifiers = _validated_subjects(subjects, n_observations=len(data))
+    identifiers = validated_subject_labels(subjects, n_observations=len(data))
     keys = _validated_feature_keys(feature_keys, n_features=data.shape[1])
     if keys != model.feature_keys:
         raise ValueError("reference model and values use different feature identities or order")
@@ -243,7 +230,7 @@ def subject_balanced_quantiles(
     samples = np.asarray(values, dtype=float)
     if samples.ndim != 1 or not len(samples) or not np.isfinite(samples).all():
         raise ValueError("values must be a non-empty finite one-dimensional array")
-    identifiers = _validated_subjects(subjects, n_observations=len(samples))
+    identifiers = validated_subject_labels(subjects, n_observations=len(samples))
     requested = np.asarray(tuple(probabilities), dtype=float)
     if requested.ndim != 1 or not len(requested):
         raise ValueError("probabilities must be a non-empty one-dimensional collection")
@@ -275,7 +262,7 @@ def fit_subspace_reference(
 ) -> SubspaceReferenceModel:
     """Fit a two-level participant-balanced mean-projector reference."""
     validated = _validated_bases(bases)
-    identifiers = _validated_subjects(subjects, n_observations=len(validated))
+    identifiers = validated_subject_labels(subjects, n_observations=len(validated))
     names = tuple(str(name) for name in roi_names)
     if len(names) != validated[0].shape[0] or len(set(names)) != len(names):
         raise ValueError("roi_names must uniquely identify every basis row")
@@ -320,7 +307,7 @@ def score_subspace_reference(
 ) -> SubspaceReferenceScores:
     """Score subspaces against a fixed reference and the HC-LOO benchmark."""
     validated = _validated_bases(bases)
-    identifiers = _validated_subjects(subjects, n_observations=len(validated))
+    identifiers = validated_subject_labels(subjects, n_observations=len(validated))
     names = tuple(str(name) for name in roi_names)
     if names != model.roi_names:
         raise ValueError("reference model and bases use different ROI identities or order")

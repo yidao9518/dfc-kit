@@ -1,53 +1,59 @@
-"""Hungarian alignment of state centroids across fitted models."""
+"""Hungarian alignment of state patterns across fitted models."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .data import FeatureKey, StateAssignments, StateLabelSequence, _readonly
+from .._arrays import readonly_copy as _readonly
+from .data import FeatureKey, StateAssignments, StateLabelSequence
 from .hmm import GaussianHMMStateModel, GaussianHMMStateResult
 from .kmeans import KMeansStateModel
+
+AlignmentMetric = Literal["euclidean", "pearson"]
 
 
 @dataclass(frozen=True)
 class StateAlignment:
     candidate_to_reference: NDArray[np.int64]
-    matched_correlations: NDArray[np.float64]
-    correlation_matrix: NDArray[np.float64]
+    matched_costs: NDArray[np.float64]
+    cost_matrix: NDArray[np.float64]
     reference_seed: int
     candidate_seed: int
     feature_keys: tuple[FeatureKey, ...]
     source_contract: str
     sample_interval_seconds: float | None
-    method: str = "maximum Pearson centroid correlation; Hungarian assignment"
+    metric: AlignmentMetric = "euclidean"
 
     def __post_init__(self) -> None:
         mapping = np.asarray(self.candidate_to_reference, dtype=np.int64)
-        matched = np.asarray(self.matched_correlations, dtype=float)
-        correlations = np.asarray(self.correlation_matrix, dtype=float)
+        matched = np.asarray(self.matched_costs, dtype=float)
+        costs = np.asarray(self.cost_matrix, dtype=float)
         if mapping.ndim != 1 or len(mapping) < 2:
             raise ValueError("state alignment mapping must contain at least two states")
         if set(mapping.tolist()) != set(range(len(mapping))):
             raise ValueError("state alignment mapping must be a complete permutation")
-        if matched.shape != mapping.shape or correlations.shape != (len(mapping), len(mapping)):
-            raise ValueError("state alignment correlation arrays have invalid shapes")
-        if not np.isfinite(matched).all() or not np.isfinite(correlations).all():
-            raise ValueError("state alignment correlations must be finite")
-        if np.any(np.abs(matched) > 1.0 + 1e-10) or np.any(
-            np.abs(correlations) > 1.0 + 1e-10
+        if matched.shape != mapping.shape or costs.shape != (len(mapping), len(mapping)):
+            raise ValueError("state alignment cost arrays have invalid shapes")
+        if not np.isfinite(matched).all() or not np.isfinite(costs).all():
+            raise ValueError("state alignment costs must be finite")
+        if np.any(matched < -1e-12) or np.any(costs < -1e-12):
+            raise ValueError("state alignment costs must be non-negative")
+        if self.metric not in {"euclidean", "pearson"}:
+            raise ValueError("state alignment metric must be 'euclidean' or 'pearson'")
+        if self.metric == "pearson" and (
+            np.any(matched > 2.0 + 1e-10) or np.any(costs > 2.0 + 1e-10)
         ):
-            raise ValueError("state alignment correlations must lie within [-1, 1]")
+            raise ValueError("Pearson alignment costs must lie within [0, 2]")
         for seed, name in (
             (self.reference_seed, "reference_seed"),
             (self.candidate_seed, "candidate_seed"),
         ):
             if isinstance(seed, (bool, np.bool_)) or not isinstance(seed, (int, np.integer)):
                 raise TypeError(f"state alignment {name} must be an integer")
-        if not str(self.method).strip():
-            raise ValueError("state alignment method must be non-empty")
         keys = tuple(tuple(str(part) for part in key) for key in self.feature_keys)
         if not keys or any(not key for key in keys) or len(set(keys)) != len(keys):
             raise ValueError("state alignment feature_keys are invalid")
@@ -59,13 +65,13 @@ class StateAlignment:
         ):
             raise ValueError("state alignment sample interval must be finite and positive")
         object.__setattr__(self, "candidate_to_reference", _readonly(mapping))
-        object.__setattr__(self, "matched_correlations", _readonly(matched))
-        object.__setattr__(self, "correlation_matrix", _readonly(correlations))
+        object.__setattr__(self, "matched_costs", _readonly(matched))
+        object.__setattr__(self, "cost_matrix", _readonly(costs))
         object.__setattr__(self, "reference_seed", int(self.reference_seed))
         object.__setattr__(self, "candidate_seed", int(self.candidate_seed))
         object.__setattr__(self, "feature_keys", keys)
         object.__setattr__(self, "source_contract", str(self.source_contract))
-        object.__setattr__(self, "method", str(self.method))
+        object.__setattr__(self, "metric", str(self.metric))
 
 
 def _intervals_match(left: float | None, right: float | None) -> bool:
@@ -78,12 +84,13 @@ def _align_patterns(
     reference_patterns: NDArray[np.float64],
     candidate_patterns: NDArray[np.float64],
     *,
+    reference_feature_scale: NDArray[np.float64],
+    metric: AlignmentMetric,
     reference_seed: int,
     candidate_seed: int,
     feature_keys: tuple[FeatureKey, ...],
     source_contract: str,
     sample_interval_seconds: float | None,
-    method: str,
 ) -> StateAlignment:
     reference_patterns = np.asarray(reference_patterns, dtype=float)
     candidate_patterns = np.asarray(candidate_patterns, dtype=float)
@@ -96,49 +103,65 @@ def _align_patterns(
         raise ValueError("state alignment patterns must have the same states-by-features shape")
     if not np.isfinite(reference_patterns).all() or not np.isfinite(candidate_patterns).all():
         raise ValueError("state alignment patterns must be finite")
-    reference_scale = reference_patterns.std(axis=1, ddof=0)
-    candidate_scale = candidate_patterns.std(axis=1, ddof=0)
-    if np.any(reference_scale < 1e-12) or np.any(candidate_scale < 1e-12):
-        raise ValueError("Pearson state alignment is undefined for a constant state pattern")
-    reference_z = (
-        reference_patterns - reference_patterns.mean(axis=1, keepdims=True)
-    ) / reference_scale[:, None]
-    candidate_z = (
-        candidate_patterns - candidate_patterns.mean(axis=1, keepdims=True)
-    ) / candidate_scale[:, None]
-    correlations = reference_z @ candidate_z.T / reference_patterns.shape[1]
+    feature_scale = np.asarray(reference_feature_scale, dtype=float)
+    if feature_scale.shape != (reference_patterns.shape[1],):
+        raise ValueError("state alignment reference feature scale has an invalid shape")
+    if not np.isfinite(feature_scale).all() or np.any(feature_scale <= 0.0):
+        raise ValueError("state alignment reference feature scale must be finite and positive")
+    if metric == "euclidean":
+        differences = (
+            reference_patterns[:, None, :] - candidate_patterns[None, :, :]
+        ) / feature_scale[None, None, :]
+        costs = np.linalg.norm(differences, axis=2)
+    elif metric == "pearson":
+        reference_scale = reference_patterns.std(axis=1, ddof=0)
+        candidate_scale = candidate_patterns.std(axis=1, ddof=0)
+        if np.any(reference_scale < 1e-12) or np.any(candidate_scale < 1e-12):
+            raise ValueError("Pearson state alignment is undefined for a constant state pattern")
+        reference_z = (
+            reference_patterns - reference_patterns.mean(axis=1, keepdims=True)
+        ) / reference_scale[:, None]
+        candidate_z = (
+            candidate_patterns - candidate_patterns.mean(axis=1, keepdims=True)
+        ) / candidate_scale[:, None]
+        correlations = reference_z @ candidate_z.T / reference_patterns.shape[1]
+        costs = np.clip(1.0 - correlations, 0.0, 2.0)
+    else:
+        raise ValueError("metric must be 'euclidean' or 'pearson'")
     try:
         from scipy.optimize import linear_sum_assignment
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError(
             "state alignment requires the 'states' extra: pip install 'dfc-kit[states]'"
         ) from error
-    reference_indices, candidate_indices = linear_sum_assignment(-correlations)
+    reference_indices, candidate_indices = linear_sum_assignment(costs)
     mapping = np.full(reference_patterns.shape[0], -1, dtype=np.int64)
     matched = np.full(reference_patterns.shape[0], np.nan, dtype=float)
     for reference_index, candidate_index in zip(
         reference_indices, candidate_indices, strict=True
     ):
         mapping[candidate_index] = reference_index
-        matched[reference_index] = correlations[reference_index, candidate_index]
+        matched[reference_index] = costs[reference_index, candidate_index]
     if np.any(mapping < 0):
         raise RuntimeError("Hungarian state assignment was incomplete")
     return StateAlignment(
         candidate_to_reference=mapping,
-        matched_correlations=matched,
-        correlation_matrix=correlations,
+        matched_costs=matched,
+        cost_matrix=costs,
         reference_seed=reference_seed,
         candidate_seed=candidate_seed,
         feature_keys=feature_keys,
         source_contract=source_contract,
         sample_interval_seconds=sample_interval_seconds,
-        method=method,
+        metric=metric,
     )
 
 
 def align_kmeans_centroids(
     reference: KMeansStateModel,
     candidate: KMeansStateModel,
+    *,
+    metric: AlignmentMetric = "euclidean",
 ) -> StateAlignment:
     """Find a one-to-one candidate-to-reference state mapping."""
     if reference.n_states != candidate.n_states:
@@ -152,18 +175,42 @@ def align_kmeans_centroids(
     return _align_patterns(
         reference.centers,
         candidate.centers,
+        reference_feature_scale=reference.feature_scale,
+        metric=metric,
         reference_seed=reference.seed,
         candidate_seed=candidate.seed,
         feature_keys=reference.feature_keys,
         source_contract=reference.source_contract,
         sample_interval_seconds=reference.sample_interval_seconds,
-        method="maximum Pearson centroid correlation; Hungarian assignment",
     )
+
+
+def align_cap_centroids(
+    reference: KMeansStateModel,
+    candidate: KMeansStateModel,
+    *,
+    metric: AlignmentMetric = "pearson",
+) -> StateAlignment:
+    """Align CAP state centres, using pattern-shape matching by default.
+
+    CAP centres are relative ROI activation configurations because each input
+    segment is ROI-wise z-scored. Pearson matching therefore compares the
+    spatial configuration without treating a proportional amplitude change as
+    a different CAP state. Pass ``metric="euclidean"`` when amplitude should
+    also contribute to the CAP pairing.
+    """
+    if not reference.source_contract.startswith("cap:") or not candidate.source_contract.startswith(
+        "cap:"
+    ):
+        raise ValueError("CAP alignment requires CAP source contracts")
+    return align_kmeans_centroids(reference, candidate, metric=metric)
 
 
 def align_gaussian_hmm_emissions(
     reference: GaussianHMMStateModel,
     candidate: GaussianHMMStateModel,
+    *,
+    metric: AlignmentMetric = "euclidean",
 ) -> StateAlignment:
     """Match candidate HMM states to reference original-feature emission means."""
     if reference.n_states != candidate.n_states:
@@ -177,12 +224,13 @@ def align_gaussian_hmm_emissions(
     return _align_patterns(
         reference.emission_means,
         candidate.emission_means,
+        reference_feature_scale=reference.feature_scale,
+        metric=metric,
         reference_seed=reference.seed,
         candidate_seed=candidate.seed,
         feature_keys=reference.feature_keys,
         source_contract=reference.source_contract,
         sample_interval_seconds=reference.sample_interval_seconds,
-        method="maximum Pearson emission-mean correlation; Hungarian assignment",
     )
 
 
@@ -245,6 +293,7 @@ def relabel_kmeans_model(
         model,
         centers=_readonly(model.centers[order]),
         standardized_centers=_readonly(model.standardized_centers[order]),
+        clustering_centers=_readonly(model.clustering_centers[order]),
     )
 
 

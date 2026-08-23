@@ -4,15 +4,15 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from dfckit.io import load_state_alignment, save_state_alignment
+from dfckit.artifacts import load_state_alignment, save_state_alignment
 from dfckit.states import StateAlignment
 
 
 def _alignment() -> StateAlignment:
     return StateAlignment(
         candidate_to_reference=np.asarray([1, 0]),
-        matched_correlations=np.asarray([0.95, 0.9]),
-        correlation_matrix=np.asarray([[0.1, 0.95], [0.9, 0.2]]),
+        matched_costs=np.asarray([0.05, 0.1]),
+        cost_matrix=np.asarray([[1.2, 0.05], [0.1, 1.4]]),
         reference_seed=17,
         candidate_seed=29,
         feature_keys=(("visual", "motor"), ("visual", "putamen")),
@@ -27,14 +27,15 @@ class StateAlignmentIOTests(unittest.TestCase):
             target = save_state_alignment(_alignment(), Path(temporary) / "alignment")
             restored = load_state_alignment(target)
             np.testing.assert_array_equal(restored.candidate_to_reference, [1, 0])
-            np.testing.assert_allclose(restored.matched_correlations, [0.95, 0.9])
+            np.testing.assert_allclose(restored.matched_costs, [0.05, 0.1])
             np.testing.assert_allclose(
-                restored.correlation_matrix,
-                [[0.1, 0.95], [0.9, 0.2]],
+                restored.cost_matrix,
+                [[1.2, 0.05], [0.1, 1.4]],
             )
             self.assertEqual(restored.reference_seed, 17)
             self.assertEqual(restored.candidate_seed, 29)
-            self.assertFalse(restored.correlation_matrix.flags.writeable)
+            self.assertEqual(restored.metric, "euclidean")
+            self.assertFalse(restored.cost_matrix.flags.writeable)
 
     def test_overwrite_and_bad_version_are_rejected(self):
         with TemporaryDirectory() as temporary:
@@ -43,7 +44,7 @@ class StateAlignmentIOTests(unittest.TestCase):
                 save_state_alignment(_alignment(), target)
             manifest = target / "manifest.json"
             text = manifest.read_text(encoding="utf-8").replace(
-                '"format_version": 1',
+                '"format_version": 2',
                 '"format_version": 99',
             )
             manifest.write_text(text, encoding="utf-8")

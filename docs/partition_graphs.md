@@ -1,6 +1,6 @@
 # Fixed-partition graph metrics
 
-`dfckit.networks` provides graph metrics for an anatomical or functional
+`dfckit.connectivity` provides graph metrics for an anatomical or functional
 partition supplied by the caller. No disease-specific ROI names or community
 assignments are built into the package.
 
@@ -57,7 +57,7 @@ trapezoidal integrals divided by the density range, so they remain on the
 metric's original scale.
 
 ```python
-from dfckit.networks import FixedPartitionGraph
+from dfckit.connectivity import FixedPartitionGraph
 
 partition = (
     "visual",

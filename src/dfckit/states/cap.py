@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..connectivity.ets import segment_standardized_samples
 from ..data import TimeSeriesDataset
+from ..preprocessing import segment_standardized_samples
 from .data import FeatureSequence, FeatureSequenceDataset
 from .kmeans import KMeansFitResult, fit_kmeans_states
 

@@ -1,6 +1,6 @@
 # Fixed-length MI and CMI
 
-`dfckit.connectivity.FixedLengthInformation` estimates symmetric statistical
+`dfckit.information.FixedLengthInformation` estimates symmetric statistical
 dependence between two predefined ROI blocks on equal-length retained-frame
 windows. It implements scalar Kraskov mutual information (MI) and optional
 Frenzel-Pompe conditional mutual information (CMI) with `scipy.spatial.cKDTree`.
@@ -9,6 +9,15 @@ MI and CMI are not directed. They do not identify information flow, effective
 connectivity, or a causal pathway. CMI asks whether the statistical dependence
 between two series remains after conditioning on another observed series; it
 does not prove that the conditioning variable mediates either signal.
+
+## Implementation boundary
+
+There is one MI/CMI estimator implementation. The scalar Kraskov and
+Frenzel-Pompe kernels, block aggregation, and single-run fixed-window estimator
+live in `dfckit.information`. The same package selects equal-length windows
+across acquisitions, resolves named ROI groups, and saves or loads the
+resulting analysis artifact. There is no second connectivity-level information
+implementation.
 
 ## Why fixed lengths are required
 
@@ -28,8 +37,9 @@ sampling seed.
 ## Estimator contract
 
 - `k=3` is the default number of neighbours.
-- `metric="chebyshev"` is fixed by the joint/marginal neighbourhood-counting
-  form of the Kraskov and Frenzel-Pompe estimators.
+- Joint and marginal neighbourhoods use the Chebyshev norm required by these
+  Kraskov and Frenzel-Pompe estimators. It is fixed internally rather than
+  exposed as a configurable metric.
 - `jitter=1e-10` with a separately recorded seed deterministically breaks exact
   ties. Set `jitter=0` only when ties are known to be absent.
 - Each ROI column is independently centered and divided by its population SD by
@@ -43,7 +53,7 @@ sampling seed.
 ## Example
 
 ```python
-from dfckit.connectivity import FixedLengthInformation
+from dfckit.information import FixedLengthInformation
 
 estimator = FixedLengthInformation(
     length=180,
@@ -99,16 +109,15 @@ dfc-kit fixed-information /path/to/xcp_d results/fixed-information \
   --draws 20 --sample-seed 20260819 --jobs 1
 ```
 
-The output is a new directory containing exactly `manifest.json`,
-`arrays.npz`, `draw_metrics.tsv`, and `session_metrics.tsv`. The manifest
+The output is a new directory containing `manifest.json` and `arrays.npz`. The manifest
 records the ordered ROI groups, estimator settings, acquisition identities,
 requested length grid, actual analyzable acquisition-by-length cells, and
 sampling mode. A length with no eligible retained window is omitted for that
 acquisition; each retained cell still contains every draw from zero through
 `draws - 1`. The numeric arrays contain pairwise MI/CMI for
-every draw; both TSV files repeat row-level identities and block means for
-inspection. `load_fixed_information` verifies that arrays, manifest, and TSV
-files agree before returning a result.
+every draw. `load_fixed_information` verifies that the arrays and manifest
+agree before returning a result; `summarize-information` produces compact
+tabular summaries when needed.
 
 For exact replay, provide a frozen schedule with this exact header:
 

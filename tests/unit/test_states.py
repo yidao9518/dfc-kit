@@ -15,6 +15,7 @@ from dfckit.states import (
     KMeansStateModel,
     StateAssignments,
     StateLabelSequence,
+    align_cap_centroids,
     align_gaussian_hmm_emissions,
     align_kmeans_centroids,
     apply_gaussian_hmm_alignment,
@@ -152,6 +153,44 @@ class KMeansStateTests(unittest.TestCase):
         predicted = predict_kmeans_states(model, unseen)
         self.assertNotEqual(predicted.sequences[0].labels[0], predicted.sequences[0].labels[1])
 
+    def test_pca_kmeans_freezes_reduction_and_reconstructs_feature_centers(self):
+        fit = fit_kmeans_states(
+            self.dataset,
+            n_states=2,
+            seed=9,
+            n_init=10,
+            n_pca_components=1,
+        )
+        model = fit.model
+
+        self.assertEqual(model.n_pca_components, 1)
+        self.assertEqual(model.clustering_centers.shape, (2, 1))
+        self.assertEqual(model.standardized_centers.shape, (2, 2))
+        reconstructed = (
+            model.clustering_centers @ model.pca_components + model.pca_mean
+        )
+        np.testing.assert_allclose(model.standardized_centers, reconstructed)
+        np.testing.assert_allclose(
+            model.centers,
+            reconstructed * model.feature_scale + model.feature_mean,
+        )
+
+        unseen = FeatureSequenceDataset(
+            [feature_sequence("sub-099", [[-2.0, -2.0], [2.0, 2.0]])]
+        )
+        predicted = predict_kmeans_states(model, unseen)
+        standardized = (
+            unseen.sequences[0].values - model.feature_mean
+        ) / model.feature_scale
+        reduced = (standardized - model.pca_mean) @ model.pca_components.T
+        expected = np.argmin(
+            np.square(
+                reduced[:, None, :] - model.clustering_centers[None, :, :]
+            ).sum(axis=2),
+            axis=1,
+        )
+        np.testing.assert_array_equal(predicted.sequences[0].labels, expected)
+
     def test_cap_uses_minibatch_without_second_global_standardization(self):
         runs = []
         for subject, shift in (("sub-001", 0.0), ("sub-002", 0.2)):
@@ -281,7 +320,6 @@ def state_model(centers, seed):
         inertia=0.0,
         fit_subjects=(f"fit-{seed}",),
         fit_sample_count=4,
-        training_data_fingerprint=None,
         implementation="test",
     )
 
@@ -326,7 +364,6 @@ def hmm_state_model(seed, order=(0, 1), *, compact=False):
         fit_sample_count=20,
         fit_sequence_count=2,
         omitted_short_sequence_count=0,
-        training_data_fingerprint=None,
         implementation="test",
     )
 
@@ -339,7 +376,8 @@ class StateAlignmentTests(unittest.TestCase):
         alignment = align_kmeans_centroids(reference, candidate)
 
         np.testing.assert_array_equal(alignment.candidate_to_reference, [1, 0])
-        self.assertTrue(np.all(alignment.matched_correlations > 0.99))
+        self.assertTrue(np.all(alignment.matched_costs < 0.2))
+        self.assertEqual(alignment.metric, "euclidean")
 
         assignments = StateAssignments(
             sequences=(
@@ -358,6 +396,39 @@ class StateAlignmentTests(unittest.TestCase):
         )
         aligned = apply_state_alignment(assignments, alignment)
         np.testing.assert_array_equal(aligned.sequences[0].labels, [1, 0, 0])
+
+    def test_euclidean_cost_preserves_amplitude_differences(self):
+        reference = state_model([[1.0, 2.0, 3.0], [-3.0, 0.0, 3.0]], seed=1)
+        candidate = state_model([[2.0, 4.0, 6.0], [1.1, 2.1, 3.1]], seed=2)
+
+        euclidean = align_kmeans_centroids(reference, candidate)
+        pearson = align_kmeans_centroids(reference, candidate, metric="pearson")
+
+        self.assertLess(euclidean.cost_matrix[0, 1], euclidean.cost_matrix[0, 0])
+        self.assertAlmostEqual(pearson.cost_matrix[0, 0], 0.0)
+        self.assertAlmostEqual(pearson.cost_matrix[0, 1], 0.0)
+        self.assertEqual(pearson.metric, "pearson")
+
+    def test_cap_alignment_uses_pearson_by_default(self):
+        reference = replace(
+            state_model([[1.0, 2.0, 3.0], [-3.0, 0.0, 3.0]], seed=1),
+            source_contract="cap:test",
+        )
+        candidate = replace(
+            state_model([[2.0, 4.0, 6.0], [-3.0, 0.0, 3.0]], seed=2),
+            source_contract="cap:test",
+        )
+
+        alignment = align_cap_centroids(reference, candidate)
+
+        self.assertEqual(alignment.metric, "pearson")
+        np.testing.assert_allclose(alignment.matched_costs, 0.0, atol=1e-12)
+
+    def test_cap_alignment_rejects_non_cap_models(self):
+        reference = state_model([[1.0, 2.0, 3.0], [-3.0, 0.0, 3.0]], seed=1)
+        candidate = state_model([[2.0, 4.0, 6.0], [3.0, 0.0, -3.0]], seed=2)
+        with self.assertRaisesRegex(ValueError, "CAP source contracts"):
+            align_cap_centroids(reference, candidate)
 
     def test_relabel_kmeans_model_reorders_centers_for_future_predictions(self):
         reference = state_model([[1.0, 0.0, -1.0], [-1.0, 0.0, 1.0]], seed=1)
@@ -378,7 +449,7 @@ class StateAlignmentTests(unittest.TestCase):
         candidate = hmm_state_model(seed=4, order=(1, 0))
         alignment = align_gaussian_hmm_emissions(reference, candidate)
         np.testing.assert_array_equal(alignment.candidate_to_reference, [1, 0])
-        self.assertTrue(np.all(alignment.matched_correlations > 0.999))
+        np.testing.assert_allclose(alignment.matched_costs, 0.0)
 
         relabeled = relabel_gaussian_hmm_model(candidate, alignment)
         for name in (

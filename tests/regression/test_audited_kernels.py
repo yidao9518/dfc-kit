@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from dfckit import TimeSeriesRun
-from dfckit.connectivity import ETS, MTD, cross_block_mtd, within_block_mtd
+from dfckit.connectivity import ETS, MTD
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "audited_kernels.json"
 
@@ -20,21 +20,23 @@ class AuditedKernelRegressionTests(unittest.TestCase):
             roi_names=("visual", "motor", "putamen"),
         )
 
-        mtd = MTD().transform(run)
+        estimator = MTD()
+        mtd = estimator.transform(run)
+        standardized = np.asarray(fixture["mtd"]["standardized_derivatives"])
         np.testing.assert_allclose(
-            mtd.standardized_derivatives,
-            fixture["mtd"]["standardized_derivatives"],
+            mtd.features,
+            standardized[:, [0, 0, 1]] * standardized[:, [1, 2, 2]],
             rtol=1e-13,
             atol=1e-13,
         )
         np.testing.assert_allclose(
-            cross_block_mtd(mtd.standardized_derivatives, [0, 1], [2]),
+            mtd.cross_block([0, 1], [2]),
             fixture["mtd"]["cross_block_visual_motor_to_putamen"],
             rtol=1e-13,
             atol=1e-13,
         )
         np.testing.assert_allclose(
-            within_block_mtd(mtd.standardized_derivatives, [0, 1, 2]),
+            mtd.within_block([0, 1, 2]),
             fixture["mtd"]["within_all"],
             rtol=1e-13,
             atol=1e-13,

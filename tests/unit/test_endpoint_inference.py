@@ -15,6 +15,7 @@ class EndpointInferenceTests(unittest.TestCase):
                         "session": "off",
                         "endpoint": "feature_0",
                         "feature": ["visual", "motor"],
+                        "statistic": "variance",
                         "value": 0.0,
                     },
                     {
@@ -22,6 +23,7 @@ class EndpointInferenceTests(unittest.TestCase):
                         "session": "on",
                         "endpoint": "feature_0",
                         "feature": ["visual", "motor"],
+                        "statistic": "variance",
                         "value": 1.0,
                     },
                 ]
@@ -37,6 +39,7 @@ class EndpointInferenceTests(unittest.TestCase):
         )
         endpoint = result["results"][0]
         self.assertEqual(endpoint["feature"], ["visual", "motor"])
+        self.assertEqual(endpoint["statistic"], "variance")
         self.assertEqual(endpoint["estimate"], 1.0)
         self.assertEqual(endpoint["p"], 0.03125)
         self.assertEqual(endpoint["result_status"], "positive")

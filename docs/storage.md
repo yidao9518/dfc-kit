@@ -10,9 +10,9 @@ Appending one sequence writes its chunks first and atomically replaces the
 manifest only after every part succeeds. The format is append-only and permits
 one writer at a time.
 
-New stores use manifest format v2. Version 1 manifests remain readable and
-represent the missing acquisition ID as `None`; appending to a v1 store upgrades
-its manifest to v2 atomically.
+FeatureStore accepts only the current manifest schema. Every sequence record
+therefore has an explicit acquisition field, which may be `None` when no
+acquisition label is available.
 
 ## Stream sliding-window FC
 
@@ -33,41 +33,32 @@ is numerically identical to `SlidingWindowFC.transform` at the default
 `float64` dtype and preserves every censor segment as a separate feature
 sequence.
 
-## Stream complete ETS
+## Stream instantaneous edges
 
 ```python
-from dfckit.storage import write_ets_store
+from dfckit.connectivity import ETS, MTD
+from dfckit.storage import write_instantaneous_edge_store
 
-store = write_ets_store(
+ets_store = write_instantaneous_edge_store(
     "/path/to/ets.store",
     runs,
+    ETS(),
     chunk_size=128,
 )
-```
 
-Segment standardization still uses the complete retained segment, but the
-frame-by-edge product matrix is created and written only in bounded row chunks.
-Use `ETS().rss()` instead when only co-fluctuation amplitude is required; that
-algebraic path avoids edge materialization entirely.
-
-## Stream MTD
-
-```python
-from dfckit.storage import write_mtd_store
-
-store = write_mtd_store(
+mtd_store = write_instantaneous_edge_store(
     "/path/to/mtd.store",
     runs,
+    MTD(),
     chunk_size=128,
 )
 ```
 
-The MTD writer uses the same run-level derivative standardization as
-`MTD().transform`. It writes one FeatureStore sequence per censor-bounded
-segment, with each row's original derivative start and end frame preserved.
-The source contract is
-`mtd:difference=within-segment;normalization=run`; it is therefore distinct
-from the segment-normalized ETS contract.
+Both generators use one writer and one instantaneous edge kernel. ETS stores
+frame intervals with equal endpoints; MTD stores derivative start/end frames.
+Their source contracts remain distinct so one store cannot mix incompatible
+sample distributions. Use `generator.rss()` when only co-fluctuation amplitude
+is required; that path avoids edge materialization.
 
 ## Stream CAP
 
@@ -146,12 +137,38 @@ read selected sequences instead of reconstructing the full dataset.
 float64 equivalence. The dtype choice is explicit at store creation and cannot
 change during later appends.
 
+## Acquisition-level feature statistics
+
+Feature rows can be reduced to one endpoint per acquisition, feature, and
+requested statistic without materializing the store:
+
+```python
+from dfckit.storage import summarize_store_statistics
+
+payload = summarize_store_statistics(
+    store,
+    statistics=("mean", "variance", "standard_deviation"),
+)
+```
+
+The supported statistics are `mean`, `variance`, `standard_deviation`,
+`minimum`, and `maximum`. Mean and second moments are combined across chunks
+with a Welford update. Variance uses all retained samples within the
+acquisition (`ddof=0`). Samples from separate censor-bounded segments may
+contribute to the same acquisition summary, but no temporal feature is ever
+constructed across the gap.
+
+Each statistic receives a distinct endpoint name, such as `feature_12.mean`
+or `feature_12.variance`. For edge FeatureStores, one selected statistic at a
+time can be reshaped into a participants-by-edges matrix for NBS. Mixing two
+statistics in one NBS graph would duplicate every edge and is invalid.
+
 ## Stream MiniBatchKMeans
 
 Feature stores can be fitted directly without calling `read_dataset()`:
 
 ```python
-from dfckit.outofcore import fit_minibatch_kmeans_store, predict_kmeans_store
+from dfckit.states.streaming import fit_minibatch_kmeans_store, predict_kmeans_store
 
 store = FeatureStore.open("/path/to/window_fc.store")
 fit = fit_minibatch_kmeans_store(
@@ -188,7 +205,7 @@ historical analysis used one complete scikit-learn `.fit` call and exact native
 feature geometry matters:
 
 ```python
-from dfckit.outofcore import fit_kmeans_store_materialized
+from dfckit.states.streaming import fit_kmeans_store_materialized
 
 fit = fit_kmeans_store_materialized(
     FeatureStore.open("/path/to/cap.store"),
@@ -205,8 +222,8 @@ fit = fit_kmeans_store_materialized(
 Materialized fitting loads the selected cohort into memory; it is not an
 out-of-core operation. `algorithm="lloyd"` calls scikit-learn `KMeans.fit`,
 whereas `algorithm="minibatch"` calls `MiniBatchKMeans.fit`. Both retain the
-FeatureStore source contract, feature identities, selected fit subjects, and
-training-data fingerprint in the returned model. CAP rows have already been
+FeatureStore source contract, feature identities, and selected fit subjects in
+the returned model. CAP rows have already been
 standardized within segment, so CAP reproduction normally uses
 `standardize_features=False`; enabling it adds a second pooled feature
 standardization and changes the fitted geometry.
@@ -229,7 +246,7 @@ For a sequence model that needs dimensionality reduction, fit IncrementalPCA
 from selected store sequences:
 
 ```python
-from dfckit.outofcore import fit_incremental_pca_store, iter_pca_store_chunks
+from dfckit.states.streaming import fit_incremental_pca_store, iter_pca_store_chunks
 
 pca = fit_incremental_pca_store(
     store,
@@ -251,7 +268,7 @@ The HMM wrapper uses the same frozen preprocessing and materializes only the
 reduced observations required by `hmmlearn`:
 
 ```python
-from dfckit.outofcore_hmm import fit_gaussian_hmm_store, predict_gaussian_hmm_store
+from dfckit.states.streaming_hmm import fit_gaussian_hmm_store, predict_gaussian_hmm_store
 
 fit = fit_gaussian_hmm_store(
     store,

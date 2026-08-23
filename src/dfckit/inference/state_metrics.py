@@ -209,7 +209,6 @@ def infer_paired_state_metrics(
         "format": "dfc-kit-paired-state-inference",
         "format_version": 1,
         "model_kind": metrics_payload.get("model_kind"),
-        "model_fingerprint": metrics_payload.get("model_fingerprint"),
         "source_contract": metrics_payload.get("source_contract"),
         "contrast": f"{condition_a} - {condition_b}",
         "condition_a": condition_a,

@@ -62,7 +62,7 @@ def infer_paired_endpoints(
             cell[session] = float(value)
         current = {
             key: row[key]
-            for key in ("feature", "measure", "length")
+            for key in ("feature", "statistic", "measure", "length")
             if row.get(key) is not None
         }
         if endpoint in metadata and metadata[endpoint] != current:

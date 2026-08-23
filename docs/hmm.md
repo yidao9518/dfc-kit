@@ -95,7 +95,7 @@ For high-dimensional window FC or ETS outputs, the store-specific wrapper keeps
 the original feature matrix on disk:
 
 ```python
-from dfckit.outofcore_hmm import fit_gaussian_hmm_store, predict_gaussian_hmm_store
+from dfckit.states.streaming_hmm import fit_gaussian_hmm_store, predict_gaussian_hmm_store
 
 fit = fit_gaussian_hmm_store(
     training_store,

@@ -5,7 +5,7 @@ from dfckit.states import SubjectValidationFold, make_subject_validation_folds
 
 
 class SubjectValidationFoldTests(unittest.TestCase):
-    def test_hash_split_is_balanced_complete_and_order_independent(self):
+    def test_seeded_split_is_balanced_complete_and_order_independent(self):
         subjects = tuple(f"sub-{index:03d}" for index in range(11))
         folds = make_subject_validation_folds(subjects, n_folds=4, seed=17)
         reordered = make_subject_validation_folds(

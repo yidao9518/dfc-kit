@@ -27,8 +27,8 @@ The acquisition must also have one original-axis outlier mask:
 sub-*_task-*_outliers.tsv
 ```
 
-`*_motion.tsv` is discovered when present and will support later QC and
-motion-matching modules. It is not currently required for FC estimation.
+`*_motion.tsv` is discovered when present and supports covariate matching. It
+is not currently required for FC estimation.
 
 ## Time-axis handling
 

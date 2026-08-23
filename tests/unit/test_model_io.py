@@ -7,8 +7,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from dfckit.io import fitted_model_fingerprint, load_fitted_model, save_fitted_model
-from dfckit.outofcore import StreamingPCAModel
+from dfckit.artifacts import load_fitted_model, save_fitted_model
 from dfckit.states import (
     FeatureSequence,
     FeatureSequenceDataset,
@@ -17,6 +16,7 @@ from dfckit.states import (
     predict_gaussian_hmm_states,
     predict_kmeans_states,
 )
+from dfckit.states.streaming import StreamingPCAModel
 
 HAS_HMM_EXTRA = importlib.util.find_spec("hmmlearn") is not None
 
@@ -43,7 +43,6 @@ def kmeans_model() -> KMeansStateModel:
         inertia=1.5,
         fit_subjects=("sub-train",),
         fit_sample_count=20,
-        training_data_fingerprint=None,
         implementation="synthetic KMeans",
     )
 
@@ -103,7 +102,6 @@ def hmm_model() -> GaussianHMMStateModel:
         fit_sample_count=20,
         fit_sequence_count=2,
         omitted_short_sequence_count=1,
-        training_data_fingerprint=None,
         implementation="synthetic GaussianHMM",
     )
 
@@ -124,77 +122,14 @@ def heldout_dataset() -> FeatureSequenceDataset:
 
 
 class FittedModelIOTests(unittest.TestCase):
-    def test_model_fingerprint_is_deterministic_and_parameter_sensitive(self):
-        model = kmeans_model()
-        self.assertEqual(fitted_model_fingerprint(model), fitted_model_fingerprint(model))
-        changed = replace(model, centers=model.centers + 0.01)
-        self.assertNotEqual(fitted_model_fingerprint(model), fitted_model_fingerprint(changed))
-        with TemporaryDirectory() as temporary:
-            restored = load_fitted_model(
-                save_fitted_model(model, Path(temporary) / "model")
-            )
-            self.assertEqual(
-                fitted_model_fingerprint(model),
-                fitted_model_fingerprint(restored),
-            )
-
-    def test_v1_artifacts_remain_readable_with_unknown_new_fit_parameters(self):
-        with TemporaryDirectory() as temporary:
-            model = kmeans_model()
-            original_fingerprint = fitted_model_fingerprint(model)
-            target = save_fitted_model(model, Path(temporary) / "model")
-            manifest_path = target / "manifest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["format_version"] = 1
-            del manifest["metadata"]["init_sample_size"]
-            del manifest["metadata"]["training_data_fingerprint"]
-            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-            restored = load_fitted_model(target)
-            self.assertIsNone(restored.init_sample_size)
-            self.assertEqual(fitted_model_fingerprint(restored), original_fingerprint)
-
-    def test_v1_hmm_artifact_remains_readable(self):
-        with TemporaryDirectory() as temporary:
-            model = hmm_model()
-            original_fingerprint = fitted_model_fingerprint(model)
-            target = save_fitted_model(model, Path(temporary) / "model")
-            manifest_path = target / "manifest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["format_version"] = 1
-            del manifest["metadata"]["pca_batch_size"]
-            del manifest["metadata"]["training_data_fingerprint"]
-            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-            restored = load_fitted_model(target)
-            self.assertIsNone(restored.pca_batch_size)
-            self.assertEqual(fitted_model_fingerprint(restored), original_fingerprint)
-
-    def test_new_fit_provenance_changes_model_fingerprint(self):
-        model = replace(
-            kmeans_model(),
-            algorithm="minibatch",
-            batch_size=8,
-            reassignment_ratio=0.01,
-            init_sample_size=100,
-        )
-        changed = replace(model, init_sample_size=200)
-        self.assertNotEqual(
-            fitted_model_fingerprint(model),
-            fitted_model_fingerprint(changed),
-        )
-        data_changed = replace(model, training_data_fingerprint="a" * 64)
-        self.assertNotEqual(
-            fitted_model_fingerprint(model),
-            fitted_model_fingerprint(data_changed),
-        )
-
-    def test_v1_artifact_rejects_v2_metadata_fields(self):
+    def test_artifact_version_is_strict(self):
         with TemporaryDirectory() as temporary:
             target = save_fitted_model(kmeans_model(), Path(temporary) / "model")
             manifest_path = target / "manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest["format_version"] = 1
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "metadata fields"):
+            with self.assertRaisesRegex(ValueError, "unsupported.*format version"):
                 load_fitted_model(target)
 
     def test_kmeans_roundtrip_preserves_predictions_and_readonly_arrays(self):
@@ -204,7 +139,7 @@ class FittedModelIOTests(unittest.TestCase):
             manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
             loaded = load_fitted_model(target)
 
-            self.assertEqual(manifest["format_version"], 2)
+            self.assertEqual(manifest["format_version"], 4)
             self.assertIn("init_sample_size", manifest["metadata"])
             self.assertIsInstance(loaded, KMeansStateModel)
             self.assertEqual(loaded.fit_subjects, model.fit_subjects)
@@ -215,6 +150,34 @@ class FittedModelIOTests(unittest.TestCase):
                 before.sequences[0].labels,
                 after.sequences[0].labels,
             )
+
+    def test_pca_kmeans_roundtrip_preserves_frozen_transform(self):
+        model = replace(
+            kmeans_model(),
+            clustering_centers=np.asarray([[-1.0, 1.0], [1.0, -1.0]]),
+            pca_mean=np.zeros(3),
+            pca_components=np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+            ),
+            pca_explained_variance_ratio=np.asarray([0.6, 0.3]),
+            n_pca_components=2,
+        )
+        with TemporaryDirectory() as temporary:
+            loaded = load_fitted_model(
+                save_fitted_model(model, Path(temporary) / "pca-kmeans.model")
+            )
+
+        self.assertEqual(loaded.n_pca_components, 2)
+        np.testing.assert_array_equal(
+            loaded.pca_components,
+            model.pca_components,
+        )
+        before = predict_kmeans_states(model, heldout_dataset())
+        after = predict_kmeans_states(loaded, heldout_dataset())
+        np.testing.assert_array_equal(
+            before.sequences[0].labels,
+            after.sequences[0].labels,
+        )
 
     def test_streaming_pca_roundtrip_preserves_all_arrays(self):
         with TemporaryDirectory() as temporary:
@@ -298,9 +261,8 @@ class FittedModelIOTests(unittest.TestCase):
                 load_fitted_model(target)
 
             manifest["format_version"] = 1
-            manifest["array_names"].append("missing")
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "archive does not match"):
+            with self.assertRaisesRegex(ValueError, "unsupported.*format version"):
                 load_fitted_model(target)
 
     def test_invalid_shape_and_missing_metadata_are_rejected(self):

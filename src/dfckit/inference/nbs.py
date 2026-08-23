@@ -1,4 +1,4 @@
-"""Experimental paired network-based statistic (NBS)."""
+"""Paired network-based statistic (NBS)."""
 
 from __future__ import annotations
 
@@ -8,25 +8,13 @@ from dataclasses import dataclass, replace
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from ._validation import validated_subject_ids
+from .._arrays import readonly_copy as _readonly
+from .._validation import validated_integer, validated_subject_ids
 
 DIRECTIONS = ("positive", "negative")
 ALTERNATIVES = ("two-sided", "greater", "less")
 COMPONENT_STATISTICS = ("edge_extent", "sum_abs_statistic")
-
-
-def _readonly(values: NDArray) -> NDArray:
-    output = np.asarray(values).copy()
-    output.setflags(write=False)
-    return output
-
-
-def _validated_integer(value: int, *, label: str, minimum: int) -> int:
-    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
-        raise TypeError(f"{label} must be an integer")
-    if value < minimum:
-        raise ValueError(f"{label} must be at least {minimum}")
-    return int(value)
+COMPONENT_SIGN_MODES = ("separate", "pooled")
 
 
 def _validated_edge_data(
@@ -153,7 +141,7 @@ def intercept_t_statistic(
 
 @dataclass(frozen=True)
 class NBSComponent:
-    """One connected set of same-tail supra-threshold edges."""
+    """One connected set of supra-threshold edges."""
 
     direction: str
     node_indices: tuple[int, ...]
@@ -256,9 +244,10 @@ def threshold_components(
     threshold: float,
     *,
     component_statistic: str = "edge_extent",
+    component_sign_mode: str = "separate",
 ) -> dict[str, tuple[NBSComponent, ...]]:
-    """Return positive and negative components without joining opposite tails."""
-    nodes = _validated_integer(n_nodes, label="n_nodes", minimum=2)
+    """Return supra-threshold components under the selected sign definition."""
+    nodes = validated_integer(n_nodes, label="n_nodes", minimum=2)
     left, right = _validated_edge_data(edge_i, edge_j, n_nodes=nodes)
     values = np.asarray(statistics, dtype=float)
     if values.ndim != 1 or len(values) != len(left):
@@ -268,13 +257,27 @@ def threshold_components(
     cutoff = _validated_thresholds((threshold,))[0]
     if component_statistic not in COMPONENT_STATISTICS:
         raise ValueError(f"component_statistic must be one of {COMPONENT_STATISTICS}")
+    if component_sign_mode not in COMPONENT_SIGN_MODES:
+        raise ValueError(f"component_sign_mode must be one of {COMPONENT_SIGN_MODES}")
+    if component_sign_mode == "pooled":
+        return {
+            "pooled": _tail_components(
+                values,
+                left,
+                right,
+                n_nodes=nodes,
+                selected=np.abs(values) > cutoff,
+                direction="pooled",
+                component_statistic=component_statistic,
+            )
+        }
     return {
         "positive": _tail_components(
             values,
             left,
             right,
             n_nodes=nodes,
-            selected=values >= cutoff,
+            selected=values > cutoff,
             direction="positive",
             component_statistic=component_statistic,
         ),
@@ -283,7 +286,7 @@ def threshold_components(
             left,
             right,
             n_nodes=nodes,
-            selected=values <= -cutoff,
+            selected=values < -cutoff,
             direction="negative",
             component_statistic=component_statistic,
         ),
@@ -303,21 +306,26 @@ class NBSThresholdResult:
     observed_mean_difference: NDArray[np.float64]
     positive_components: tuple[NBSComponent, ...]
     negative_components: tuple[NBSComponent, ...]
-    null_positive: NDArray[np.float64]
-    null_negative: NDArray[np.float64]
+    pooled_components: tuple[NBSComponent, ...]
+    null_positive: NDArray[np.float64] | None
+    null_negative: NDArray[np.float64] | None
+    null_pooled: NDArray[np.float64] | None
     null_maximum: NDArray[np.float64]
     alternative: str
     component_statistic: str
+    component_sign_mode: str
     fwe_scope: str
 
     @property
     def components(self) -> tuple[NBSComponent, ...]:
+        if self.component_sign_mode == "pooled":
+            return self.pooled_components
         return self.positive_components + self.negative_components
 
 
 @dataclass(frozen=True)
 class PairedNBSResult:
-    """Direction-separated, participant-sign-flip NBS over fixed thresholds."""
+    """Participant-sign-flip NBS over fixed thresholds."""
 
     threshold_results: tuple[NBSThresholdResult, ...]
     subject_ids: tuple[str, ...]
@@ -326,6 +334,7 @@ class PairedNBSResult:
     n_nodes: int
     alternative: str
     component_statistic: str
+    component_sign_mode: str
     difference_direction: str
     confound_names: tuple[str, ...]
     n_permutations: int
@@ -333,7 +342,6 @@ class PairedNBSResult:
     permutation_unit: str
     permutation_method: str
     threshold_correction: str
-    experimental: bool = True
 
     def at_threshold(self, threshold: float) -> NBSThresholdResult:
         for result in self.threshold_results:
@@ -360,28 +368,39 @@ def paired_nbs(
     difference_direction: str,
     alternative: str = "two-sided",
     component_statistic: str = "edge_extent",
+    component_sign_mode: str = "separate",
     confounds: ArrayLike | None = None,
     confound_names: Sequence[str] = (),
 ) -> PairedNBSResult:
-    """Run experimental NBS on one edge vector of paired differences per participant.
+    """Run NBS on one edge vector of paired differences per participant.
 
     With confounds, residuals from a centered nuisance-only reduced model are
     sign-flipped and added back to its fitted values. Without confounds, each
     participant's complete edge vector is sign-flipped directly.
+
+    ``component_sign_mode="separate"`` constructs positive and negative
+    components independently. ``"pooled"`` thresholds the absolute t
+    statistic and permits opposite-sign edges to join the same component.
     """
-    nodes = _validated_integer(n_nodes, label="n_nodes", minimum=2)
+    nodes = validated_integer(n_nodes, label="n_nodes", minimum=2)
     left, right = _validated_edge_data(edge_i, edge_j, n_nodes=nodes)
     values = _validated_differences(differences, n_edges=len(left))
     identifiers = validated_subject_ids(subject_ids, len(values))
     cutoffs = _validated_thresholds(thresholds)
-    permutations = _validated_integer(
+    permutations = validated_integer(
         n_permutations, label="n_permutations", minimum=1
     )
-    permutation_seed = _validated_integer(seed, label="seed", minimum=0)
+    permutation_seed = validated_integer(seed, label="seed", minimum=0)
     if alternative not in ALTERNATIVES:
         raise ValueError(f"alternative must be one of {ALTERNATIVES}")
     if component_statistic not in COMPONENT_STATISTICS:
         raise ValueError(f"component_statistic must be one of {COMPONENT_STATISTICS}")
+    if component_sign_mode not in COMPONENT_SIGN_MODES:
+        raise ValueError(f"component_sign_mode must be one of {COMPONENT_SIGN_MODES}")
+    if component_sign_mode == "pooled" and alternative != "two-sided":
+        raise ValueError(
+            'component_sign_mode="pooled" requires alternative="two-sided"'
+        )
     if not str(difference_direction).strip():
         raise ValueError("difference_direction must describe the paired subtraction")
 
@@ -409,6 +428,7 @@ def paired_nbs(
             nodes,
             cutoff,
             component_statistic=component_statistic,
+            component_sign_mode=component_sign_mode,
         )
         for cutoff in cutoffs
     }
@@ -421,12 +441,21 @@ def paired_nbs(
         fitted = centered @ nuisance_coefficients
         residual = values - fitted
 
-    null_positive = {
-        cutoff: np.zeros(permutations, dtype=float) for cutoff in cutoffs
-    }
-    null_negative = {
-        cutoff: np.zeros(permutations, dtype=float) for cutoff in cutoffs
-    }
+    null_positive = (
+        {cutoff: np.zeros(permutations, dtype=float) for cutoff in cutoffs}
+        if component_sign_mode == "separate"
+        else None
+    )
+    null_negative = (
+        {cutoff: np.zeros(permutations, dtype=float) for cutoff in cutoffs}
+        if component_sign_mode == "separate"
+        else None
+    )
+    null_pooled = (
+        {cutoff: np.zeros(permutations, dtype=float) for cutoff in cutoffs}
+        if component_sign_mode == "pooled"
+        else None
+    )
     rng = np.random.default_rng(permutation_seed)
     for permutation in range(permutations):
         signs = rng.choice((-1.0, 1.0), size=(len(values), 1))
@@ -440,27 +469,48 @@ def paired_nbs(
                 nodes,
                 cutoff,
                 component_statistic=component_statistic,
+                component_sign_mode=component_sign_mode,
             )
-            null_positive[cutoff][permutation] = _maximum_component(
-                components["positive"]
-            )
-            null_negative[cutoff][permutation] = _maximum_component(
-                components["negative"]
-            )
+            if component_sign_mode == "pooled":
+                assert null_pooled is not None
+                null_pooled[cutoff][permutation] = _maximum_component(
+                    components["pooled"]
+                )
+            else:
+                assert null_positive is not None and null_negative is not None
+                null_positive[cutoff][permutation] = _maximum_component(
+                    components["positive"]
+                )
+                null_negative[cutoff][permutation] = _maximum_component(
+                    components["negative"]
+                )
 
     threshold_results = []
     for cutoff in cutoffs:
-        positive_null = null_positive[cutoff]
-        negative_null = null_negative[cutoff]
-        if alternative == "two-sided":
-            family_null = np.maximum(positive_null, negative_null)
+        if component_sign_mode == "pooled":
+            assert null_pooled is not None
+            positive_null = None
+            negative_null = None
+            pooled_null = null_pooled[cutoff]
+            family_null = pooled_null
+            positive = ()
+            negative = ()
+            pooled = observed[cutoff]["pooled"]
+        else:
+            assert null_positive is not None and null_negative is not None
+            positive_null = null_positive[cutoff]
+            negative_null = null_negative[cutoff]
+            pooled_null = None
+            pooled = ()
+        if component_sign_mode == "separate" and alternative == "two-sided":
             positive = observed[cutoff]["positive"]
             negative = observed[cutoff]["negative"]
-        elif alternative == "greater":
+            family_null = np.maximum(positive_null, negative_null)
+        elif component_sign_mode == "separate" and alternative == "greater":
             family_null = positive_null
             positive = observed[cutoff]["positive"]
             negative = ()
-        else:
+        elif component_sign_mode == "separate":
             family_null = negative_null
             positive = ()
             negative = observed[cutoff]["negative"]
@@ -472,6 +522,10 @@ def paired_nbs(
             replace(component, fwe_pvalue=_component_pvalue(component, family_null))
             for component in negative
         )
+        pooled = tuple(
+            replace(component, fwe_pvalue=_component_pvalue(component, family_null))
+            for component in pooled
+        )
         threshold_results.append(
             NBSThresholdResult(
                 threshold=cutoff,
@@ -479,15 +533,33 @@ def paired_nbs(
                 observed_mean_difference=_readonly(observed_mean),
                 positive_components=positive,
                 negative_components=negative,
-                null_positive=_readonly(positive_null),
-                null_negative=_readonly(negative_null),
+                pooled_components=pooled,
+                null_positive=(
+                    None if positive_null is None else _readonly(positive_null)
+                ),
+                null_negative=(
+                    None if negative_null is None else _readonly(negative_null)
+                ),
+                null_pooled=None if pooled_null is None else _readonly(pooled_null),
                 null_maximum=_readonly(family_null),
                 alternative=alternative,
                 component_statistic=component_statistic,
-                fwe_scope="maximum component across tested tails within this threshold",
+                component_sign_mode=component_sign_mode,
+                fwe_scope=(
+                    "maximum absolute-thresholded pooled component within this threshold"
+                    if component_sign_mode == "pooled"
+                    else "maximum component across tested tails within this threshold"
+                ),
             )
         )
 
+    correction_scope = (
+        "component-level FWE for the pooled absolute-threshold support "
+        "within each fixed threshold"
+        if component_sign_mode == "pooled"
+        else "component-level FWE across tested sign-separated tails "
+        "within each fixed threshold"
+    )
     return PairedNBSResult(
         threshold_results=tuple(threshold_results),
         subject_ids=identifiers,
@@ -496,6 +568,7 @@ def paired_nbs(
         n_nodes=nodes,
         alternative=alternative,
         component_statistic=component_statistic,
+        component_sign_mode=component_sign_mode,
         difference_direction=str(difference_direction),
         confound_names=names,
         n_permutations=permutations,
@@ -507,7 +580,7 @@ def paired_nbs(
             else "reduced-model residual sign flip with centered confounds"
         ),
         threshold_correction=(
-            "separate component-level FWE within each fixed threshold; "
-            "no correction or independent-replication claim across thresholds"
+            f"{correction_scope}; no correction or independent-replication claim "
+            "across thresholds"
         ),
     )

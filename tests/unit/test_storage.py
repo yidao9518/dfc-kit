@@ -17,13 +17,12 @@ from dfckit.states import (
 from dfckit.storage import (
     FeatureStore,
     append_cap,
+    append_instantaneous_edges,
     append_leida,
-    append_mtd,
     append_window_fc,
     write_cap_store,
-    write_ets_store,
+    write_instantaneous_edge_store,
     write_leida_store,
-    write_mtd_store,
     write_window_fc_store,
 )
 
@@ -137,7 +136,7 @@ class FeatureStoreTests(unittest.TestCase):
             )
             np.testing.assert_array_equal(loaded.values, second_acquisition.values)
 
-    def test_v1_manifest_reads_and_upgrades_on_append(self):
+    def test_legacy_manifest_is_rejected(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary) / "features"
             store = FeatureStore.create(
@@ -153,27 +152,8 @@ class FeatureStoreTests(unittest.TestCase):
                 sequence.pop("acquisition_id")
             (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
-            legacy = FeatureStore.open(root)
-            self.assertEqual(
-                legacy.sequence_identities,
-                (("sub-001", "off", None, 0),),
-            )
-            upgraded_sequence = FeatureSequence(
-                values=self.first.values + 2000.0,
-                sample_start_indices=self.first.sample_start_indices,
-                sample_end_indices=self.first.sample_end_indices,
-                feature_keys=self.keys,
-                subject="sub-001",
-                session="off",
-                acquisition_id="task-rest_run-2",
-                segment_id=0,
-                source_contract="synthetic:v1",
-                sample_interval_seconds=1.6,
-            )
-            legacy.append_sequence(upgraded_sequence, chunk_size=4)
-            upgraded_manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(upgraded_manifest["format_version"], 2)
-            self.assertTrue(all("acquisition_id" in item for item in upgraded_manifest["sequences"]))
+            with self.assertRaisesRegex(ValueError, "unsupported"):
+                FeatureStore.open(root)
 
     def test_append_is_atomic_for_invalid_parts_and_rejects_duplicates(self):
         with TemporaryDirectory() as temporary:
@@ -219,72 +199,6 @@ class FeatureStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unsupported"):
                 FeatureStore.open(root)
 
-    def test_data_fingerprint_is_chunk_invariant_and_content_sensitive(self):
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            stores = []
-            for name, chunk_size in (("left", 3), ("right", 4)):
-                store = FeatureStore.create(
-                    root / name,
-                    feature_keys=self.keys,
-                    source_contract="synthetic:v1",
-                    sample_interval_seconds=1.6,
-                )
-                store.append_dataset(
-                    FeatureSequenceDataset((self.first, self.second)),
-                    chunk_size=chunk_size,
-                )
-                stores.append(store)
-            left, right = stores
-            self.assertEqual(left.data_fingerprint(), right.data_fingerprint())
-            self.assertEqual(
-                left.feature_contract_fingerprint(),
-                right.feature_contract_fingerprint(),
-            )
-            self.assertEqual(len(left.feature_contract_fingerprint()), 64)
-            self.assertEqual(len(left.data_fingerprint()), 64)
-            self.assertEqual(
-                left.data_fingerprint(subjects=("sub-001",)),
-                left.data_fingerprint(minimum_sequence_length=8),
-            )
-            changed = FeatureStore.create(
-                root / "changed",
-                feature_keys=self.keys,
-                source_contract="synthetic:v1",
-                sample_interval_seconds=1.6,
-            )
-            changed_first = FeatureSequence(
-                values=self.first.values + 0.01,
-                sample_start_indices=self.first.sample_start_indices,
-                sample_end_indices=self.first.sample_end_indices,
-                feature_keys=self.keys,
-                subject="sub-001",
-                session="off",
-                segment_id=0,
-                source_contract="synthetic:v1",
-                sample_interval_seconds=1.6,
-            )
-            changed.append_dataset(
-                FeatureSequenceDataset((changed_first, self.second)),
-                chunk_size=3,
-            )
-            self.assertNotEqual(left.data_fingerprint(), changed.data_fingerprint())
-            self.assertEqual(
-                left.feature_contract_fingerprint(),
-                changed.feature_contract_fingerprint(),
-            )
-            different_contract = FeatureStore.create(
-                root / "different-contract",
-                feature_keys=self.keys,
-                source_contract="synthetic:v2",
-                sample_interval_seconds=1.6,
-            )
-            self.assertNotEqual(
-                left.feature_contract_fingerprint(),
-                different_contract.feature_contract_fingerprint(),
-            )
-
-
 class StreamingEstimatorStoreTests(unittest.TestCase):
     def setUp(self):
         rng = np.random.default_rng(73)
@@ -328,9 +242,10 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
     def test_streamed_ets_matches_materialized_result(self):
         expected = ETS().transform(self.run)
         with TemporaryDirectory() as temporary:
-            store = write_ets_store(
+            store = write_instantaneous_edge_store(
                 Path(temporary) / "ets",
                 (self.run,),
+                ETS(),
                 chunk_size=5,
             )
             observed = store.read_dataset()
@@ -340,7 +255,7 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
             )
 
             np.testing.assert_array_equal(features, expected.features)
-            np.testing.assert_array_equal(starts, expected.original_indices)
+            np.testing.assert_array_equal(starts, expected.sample_start_frames)
             self.assertTrue(all(chunk.values.shape[0] <= 5 for chunk in store.iter_chunks()))
 
     def test_streamed_cap_matches_materialized_segment_patterns(self):
@@ -423,9 +338,10 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
     def test_streamed_mtd_matches_materialized_result_and_preserves_gap_segments(self):
         expected = MTD().transform(self.run)
         with TemporaryDirectory() as temporary:
-            store = write_mtd_store(
+            store = write_instantaneous_edge_store(
                 Path(temporary) / "mtd",
                 (self.run,),
+                MTD(),
                 chunk_size=5,
             )
             observed = store.read_dataset()
@@ -438,15 +354,15 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
             )
 
             np.testing.assert_allclose(features, expected.features)
-            np.testing.assert_array_equal(starts, expected.start_frames)
-            np.testing.assert_array_equal(ends, expected.end_frames)
+            np.testing.assert_array_equal(starts, expected.sample_start_frames)
+            np.testing.assert_array_equal(ends, expected.sample_end_frames)
             self.assertEqual(store.source_contract, "mtd:difference=within-segment;normalization=run")
             self.assertEqual(store.sequence_identities[0][3], 0)
             self.assertEqual(store.sequence_identities[1][3], 1)
             self.assertTrue(all(chunk.values.shape[0] <= 5 for chunk in store.iter_chunks()))
 
             with self.assertRaisesRegex(ValueError, "already contains"):
-                append_mtd(store, self.run, chunk_size=5)
+                append_instantaneous_edges(store, self.run, MTD(), chunk_size=5)
 
 
 if __name__ == "__main__":

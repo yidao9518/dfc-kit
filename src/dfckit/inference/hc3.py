@@ -9,7 +9,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from ._validation import validated_subject_ids
+from .._arrays import readonly_copy as _readonly
+from .._validation import validated_subject_ids
 
 
 def _beta_continued_fraction(a: float, b: float, x: float) -> float:
@@ -84,12 +85,6 @@ def _student_t_two_sided_p(statistic: float, degrees_of_freedom: int) -> float:
         return 0.0
     x = degrees_of_freedom / (degrees_of_freedom + statistic * statistic)
     return _regularized_incomplete_beta(degrees_of_freedom / 2.0, 0.5, x)
-
-
-def _readonly(values: NDArray) -> NDArray:
-    output = np.asarray(values).copy()
-    output.setflags(write=False)
-    return output
 
 
 @dataclass(frozen=True)

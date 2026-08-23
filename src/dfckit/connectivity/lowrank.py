@@ -8,13 +8,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from .._arrays import readonly_copy as _readonly
 from ..data import TimeSeriesRun
-
-
-def _readonly(values: NDArray) -> NDArray:
-    output = np.asarray(values).copy()
-    output.setflags(write=False)
-    return output
 
 
 def _validated_values(values: ArrayLike, *, label: str) -> NDArray[np.float64]:

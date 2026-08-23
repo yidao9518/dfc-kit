@@ -117,101 +117,19 @@ The model records the fitted participant IDs. Held-out prediction rejects any
 overlap with those IDs. Occupancy, dwell, switches, and transitions are then
 computed separately inside every censor-delimited sequence.
 
-If $K$ is not prespecified, split the development participants into mutually
-exclusive validation folds, fit and score every candidate under every
-prespecified complete-fit seed in each fold, and combine the complete
-fold-by-candidate-by-seed grid of v2 score artifacts with
-`compare-state-counts`. Seeds are averaged within participant; uncertainty for
-the one-standard-error rule is estimated across validation folds only. In nested
-cross-validation this selection runs independently inside each outer training
-set; the outer test fold remains untouched. See
-[Cross-fold state-count selection](state_selection.md) for the complete command
-and weighting contract.
-
-The executable path can construct those inner folds and run the complete grid
-without manually invoking fit and score commands:
-
-```bash
-dfc-kit cross-validate-state-counts \
-  features/window-fc.store results/k-selection \
-  --method kmeans \
-  --n-states 2 \
-  --n-states 4 \
-  --n-states 6 \
-  --seed 20260818 \
-  --seed 20260819 \
-  --n-folds 5 \
-  --split-seed 20260818
-```
-
-When this is nested inside an outer split, add one `--subject` option for each
-outer-training participant. The resulting portable directory retains every
-inner-fold model, held-out score, split assignment, and final comparison.
-
-After inner selection, refit the chosen $K$ on that complete outer-training
-cohort and score the untouched outer-test participants exactly once:
-
-```bash
-dfc-kit evaluate-selected-state-count \
-  features/window-fc.store \
-  results/k-selection \
-  results/outer-evaluation \
-  --selection one-standard-error \
-  --test-subject sub-004
-```
-
-The command reuses every inner fit setting and model seed. It also checks that
-the development feature values have not changed and that the named test
-participants did not enter any inner fold. Repeat the complete inner-selection
-and outer-evaluation sequence independently for each outer fold.
-
-The complete nested loop can instead be run atomically:
-
-```bash
-dfc-kit nested-cross-validate-state-counts \
-  features/window-fc.store \
-  results/nested-k \
-  --checkpoint results/nested-k.checkpoint \
-  --method kmeans \
-  --n-states 2 \
-  --n-states 4 \
-  --n-states 6 \
-  --seed 20260818 \
-  --seed 20260819 \
-  --outer-n-folds 5 \
-  --outer-split-seed 20260818 \
-  --inner-n-folds 4 \
-  --inner-split-seed 20260819
-```
-
-Every outer fold receives its own independent inner workflow. The final score
-averages the one held-out score from every participant rather than averaging
-fold means, so unequal outer-fold sizes do not change participant weights. If
-the process is interrupted, rerun the identical command to reuse validated
-inner model/score cells and complete fold artifacts; any data or option drift is
-rejected. See
-[Nested state-count cross-validation](nested_cross_validation.md).
-
-Check the interrupted workflow without changing it:
-
-```bash
-dfc-kit inspect-nested-state-counts \
-  features/window-fc.store \
-  results/nested-k.checkpoint
-```
-
-The reported completion fraction counts validated fitted models, while separate
-fields report completed inner scores; neither is an estimate of remaining
-wall-clock time.
-`execution_status` additionally identifies a live worker, an idle checkpoint,
-or a stale owner record left by a terminated worker. Rerunning the original
-command safely reclaims a stale record; a concurrent live writer is rejected.
+If $K$ is not prespecified, create subject-disjoint validation folds, fit and
+score each candidate on the same held-out subjects, and pass the resulting
+score reports to `dfckit.states.compare_state_model_scores`. Seeds are
+averaged within participant and uncertainty for the one-standard-error rule is
+estimated across validation folds. The returned object contains the candidate
+means and the selected K; refitting a final model is a separate, explicit fit.
+See [State-count selection](state_selection.md).
 
 ## Align states across repeated seeds
 
 State numbers are arbitrary: state `0` from one fit is not automatically state
 `0` from another. Use one prespecified seed as the reference, align every other
-fit by one-to-one centroid-pattern correlation, and only then compare state
+fit by one-to-one whole-network pattern distance, and only then compare state
 metrics across seeds:
 
 ```python
@@ -237,20 +155,20 @@ reference_fit = repeated_fits[0]
 aligned_test_assignments = [
     predict_kmeans_states(reference_fit.model, test_sequences)
 ]
-matched_correlations = []
+matched_costs = []
 
 for candidate_fit in repeated_fits[1:]:
     alignment = align_kmeans_centroids(
         reference_fit.model,
         candidate_fit.model,
     )
-    matched_correlations.append(alignment.matched_correlations)
+    matched_costs.append(alignment.matched_costs)
     candidate_test = predict_kmeans_states(candidate_fit.model, test_sequences)
     aligned_test_assignments.append(
         apply_state_alignment(candidate_test, alignment)
     )
 
-centroid_stability = np.stack(matched_correlations)
+centroid_stability = np.stack(matched_costs)
 metrics_by_seed = [
     summarize_state_assignments(assignments)
     for assignments in aligned_test_assignments
@@ -262,7 +180,10 @@ occupancy_seed_sd = occupancy_by_seed.std(axis=0, ddof=0)
 ```
 
 `centroid_stability` has one row per non-reference seed and one column per
-reference state. Report its distribution rather than only the best seed.
+reference state. It contains standardized Euclidean costs by default, so
+smaller values indicate closer whole-network patterns. Report its distribution
+rather than only the best seed. To compare proportional shape instead, pass
+`metric="pearson"` to `align_kmeans_centroids`.
 `occupancy_seed_sd` describes how much each held-out run's aligned occupancy
 changes across complete refits. The first seed must be selected without looking
 at clinical outcomes. In cross-validation, repeat this entire fit, alignment,
@@ -285,8 +206,8 @@ dfc-kit summarize-stability \
   --subject sub-004
 ```
 
-The reference fingerprint defines state numbering. Candidate models must share
-the exact training-data fingerprint and all recorded non-seed settings. See
+The reference model defines state numbering. Candidate models must share the
+same training participants, feature settings, and non-seed model settings. See
 [Repeated-fit state stability](state_stability.md) for the JSON schema and
 cross-validation boundary.
 
@@ -301,7 +222,7 @@ contract, sampling interval, original sample indices, and censor segments:
 from pathlib import Path
 
 from dfckit.connectivity import SlidingWindowFC
-from dfckit.outofcore import fit_minibatch_kmeans_store, predict_kmeans_store
+from dfckit.states.streaming import fit_minibatch_kmeans_store, predict_kmeans_store
 from dfckit.storage import write_window_fc_store
 
 estimator = SlidingWindowFC(length=56, step=8, taper="hamming")
@@ -343,7 +264,7 @@ If a sequence model is required, use an explicit PCA dimension so the original
 edge matrix remains on disk:
 
 ```python
-from dfckit.outofcore_hmm import fit_gaussian_hmm_store, predict_gaussian_hmm_store
+from dfckit.states.streaming_hmm import fit_gaussian_hmm_store, predict_gaussian_hmm_store
 
 hmm_fit = fit_gaussian_hmm_store(
     training_store,
@@ -368,7 +289,7 @@ Held-out decoding uses the frozen scaler, PCA components, and HMM parameters.
 Save fitted models before a later held-out run without using pickle:
 
 ```python
-from dfckit.io import load_fitted_model, save_fitted_model
+from dfckit.artifacts import load_fitted_model, save_fitted_model
 
 model_path = save_fitted_model(
     hmm_fit.model,
@@ -410,7 +331,7 @@ interval = paired_bootstrap_mean_ci(
 )
 conditional = paired_hc3(
     on_minus_off,
-    covariates=qc_differences,
+    covariates=nuisance_differences,
     subject_ids=subject_ids,
     covariate_names=("delta_mean_fd", "delta_censor"),
     difference_direction="ON minus OFF",

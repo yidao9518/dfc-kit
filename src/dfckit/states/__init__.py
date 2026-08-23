@@ -1,7 +1,9 @@
 """State models and label-alignment utilities."""
 
 from .alignment import (
+    AlignmentMetric,
     StateAlignment,
+    align_cap_centroids,
     align_gaussian_hmm_emissions,
     align_kmeans_centroids,
     apply_gaussian_hmm_alignment,
@@ -16,6 +18,7 @@ from .data import (
     FeatureSequenceDataset,
     StateAssignments,
     StateLabelSequence,
+    instantaneous_edge_sequences,
     leida_sequences,
     timeseries_sequences,
     window_fc_sequences,
@@ -36,12 +39,24 @@ from .kmeans import (
 )
 from .metrics import RunStateMetrics, summarize_state_assignments
 from .scoring import RunGaussianHMMScore, RunKMeansScore, RunStateModelScore
-from .selection import StateCountSelection, select_state_count
+from .selection import (
+    CandidateStateModelScores,
+    FoldStateModelScores,
+    StateCountComparison,
+    StateCountSelection,
+    compare_state_model_scores,
+    select_state_count,
+    state_count_comparison_payload,
+    write_state_count_comparison,
+)
 from .stability import RunStateStability, summarize_state_stability
 
 __all__ = [
+    "AlignmentMetric",
+    "CandidateStateModelScores",
     "FeatureSequence",
     "FeatureSequenceDataset",
+    "FoldStateModelScores",
     "GaussianHMMFitResult",
     "GaussianHMMStateModel",
     "GaussianHMMStateResult",
@@ -54,17 +69,21 @@ __all__ = [
     "RunStateStability",
     "StateAlignment",
     "StateAssignments",
+    "StateCountComparison",
     "StateCountSelection",
     "StateLabelSequence",
     "SubjectValidationFold",
+    "align_cap_centroids",
     "align_gaussian_hmm_emissions",
     "align_kmeans_centroids",
     "apply_gaussian_hmm_alignment",
     "apply_state_alignment",
     "cap_sequences",
+    "compare_state_model_scores",
     "fit_cap_states",
     "fit_gaussian_hmm_states",
     "fit_kmeans_states",
+    "instantaneous_edge_sequences",
     "leida_sequences",
     "make_subject_validation_folds",
     "predict_gaussian_hmm_states",
@@ -73,8 +92,10 @@ __all__ = [
     "relabel_gaussian_hmm_model",
     "relabel_kmeans_model",
     "select_state_count",
+    "state_count_comparison_payload",
     "summarize_state_assignments",
     "summarize_state_stability",
     "timeseries_sequences",
     "window_fc_sequences",
+    "write_state_count_comparison",
 ]

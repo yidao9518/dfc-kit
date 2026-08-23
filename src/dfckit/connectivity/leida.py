@@ -8,13 +8,9 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from .._arrays import readonly_copy as _readonly
+from .._validation import validated_roi_indices
 from ..data import TimeSeriesRun
-
-
-def _readonly(values: NDArray) -> NDArray:
-    output = np.asarray(values).copy()
-    output.setflags(write=False)
-    return output
 
 
 def _validated_phase(values: ArrayLike) -> NDArray[np.float64]:
@@ -24,29 +20,6 @@ def _validated_phase(values: ArrayLike) -> NDArray[np.float64]:
     if not np.isfinite(phase).all():
         raise ValueError("phase contains non-finite values")
     return phase
-
-
-def _validated_nodes(
-    nodes: Iterable[int],
-    *,
-    n_rois: int,
-    label: str,
-    minimum: int,
-) -> NDArray[np.int64]:
-    raw = tuple(nodes)
-    if len(raw) < minimum:
-        raise ValueError(f"{label} must contain at least {minimum} ROI indices")
-    if any(
-        isinstance(node, (bool, np.bool_)) or not isinstance(node, (int, np.integer))
-        for node in raw
-    ):
-        raise TypeError(f"{label} must contain integer ROI indices")
-    output = np.asarray(raw, dtype=np.int64)
-    if len(set(output.tolist())) != len(output):
-        raise ValueError(f"{label} contains duplicate ROI indices")
-    if np.any(output < 0) or np.any(output >= n_rois):
-        raise ValueError(f"{label} contains an ROI index outside [0, {n_rois})")
-    return output
 
 
 @dataclass(frozen=True)
@@ -133,13 +106,13 @@ def cross_block_phase_coherence(
 ) -> NDArray[np.float64]:
     """Return mean instantaneous phase coherence between two disjoint blocks."""
     angles = _validated_phase(phase)
-    left_nodes = _validated_nodes(
+    left_nodes = validated_roi_indices(
         left,
         n_rois=angles.shape[1],
         label="left block",
         minimum=1,
     )
-    right_nodes = _validated_nodes(
+    right_nodes = validated_roi_indices(
         right,
         n_rois=angles.shape[1],
         label="right block",
@@ -160,7 +133,7 @@ def within_block_phase_coherence(
 ) -> NDArray[np.float64]:
     """Return off-diagonal mean instantaneous phase coherence within a block."""
     angles = _validated_phase(phase)
-    selected = _validated_nodes(
+    selected = validated_roi_indices(
         nodes,
         n_rois=angles.shape[1],
         label="within block",

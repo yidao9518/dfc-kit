@@ -2,8 +2,13 @@ import unittest
 
 import numpy as np
 
-from dfckit import TimeSeriesDataset, TimeSeriesRun
-from dfckit.connectivity import ETS, edge_rss, fit_ets_event_threshold
+from dfckit import TimeSeriesRun
+from dfckit.connectivity import (
+    ETS,
+    InstantaneousEdgeResult,
+    edge_products,
+    edge_rss,
+)
 
 
 def make_run(subject="sub-001", session="off"):
@@ -48,6 +53,7 @@ class ETSTests(unittest.TestCase):
         )
 
         np.testing.assert_allclose(result.features, expected)
+        np.testing.assert_allclose(result.features, edge_products(standardized))
         np.testing.assert_array_equal(result.edge_i, [0, 0, 1])
         np.testing.assert_array_equal(result.edge_j, [1, 2, 2])
 
@@ -56,6 +62,10 @@ class ETSTests(unittest.TestCase):
         complete = ETS().transform(run)
         rss_only = ETS().rss(run)
 
+        self.assertIsInstance(complete, InstantaneousEdgeResult)
+        self.assertIsInstance(rss_only, InstantaneousEdgeResult)
+        self.assertEqual(complete.sample_kind, "frame")
+        np.testing.assert_array_equal(complete.sample_start_frames, complete.sample_end_frames)
         np.testing.assert_allclose(rss_only.rss, np.sqrt((complete.features**2).sum(axis=1)))
         np.testing.assert_allclose(rss_only.rss, complete.rss)
 
@@ -63,7 +73,7 @@ class ETSTests(unittest.TestCase):
         run = make_run()
         result = ETS().rss(run)
 
-        np.testing.assert_array_equal(result.original_indices, [0, 1, 2, 6, 7, 8])
+        np.testing.assert_array_equal(result.sample_start_frames, [0, 1, 2, 6, 7, 8])
         np.testing.assert_array_equal(result.segment_ids, [0, 0, 0, 1, 1, 1])
 
         singleton_run = TimeSeriesRun(
@@ -72,7 +82,7 @@ class ETSTests(unittest.TestCase):
             roi_names=run.roi_names,
         )
         singleton_result = ETS().rss(singleton_run)
-        np.testing.assert_array_equal(singleton_result.original_indices, [3, 4, 5, 9, 10, 11])
+        np.testing.assert_array_equal(singleton_result.sample_start_frames, [3, 4, 5, 9, 10, 11])
         np.testing.assert_array_equal(singleton_result.segment_ids, [1, 1, 1, 2, 2, 2])
 
     def test_optimized_identity_matches_explicit_edges(self):
@@ -82,21 +92,6 @@ class ETSTests(unittest.TestCase):
         explicit = standardized[:, left] * standardized[:, right]
 
         np.testing.assert_allclose(edge_rss(standardized), np.linalg.norm(explicit, axis=1))
-
-    def test_event_threshold_records_fit_subjects_and_classifies(self):
-        dataset = TimeSeriesDataset(
-            [make_run("sub-001", "off"), make_run("sub-002", "off")]
-        )
-        threshold = fit_ets_event_threshold(dataset, percentile=80.0)
-        result = ETS().rss(dataset.runs[0])
-
-        self.assertEqual(threshold.fit_subjects, ("sub-001", "sub-002"))
-        np.testing.assert_array_equal(threshold.event_mask(result), result.rss >= threshold.value)
-
-    def test_event_threshold_requires_subject_ids(self):
-        dataset = TimeSeriesDataset([make_run(None, None)])
-        with self.assertRaisesRegex(ValueError, "requires subject IDs"):
-            fit_ets_event_threshold(dataset)
 
     def test_no_two_frame_segment_is_rejected(self):
         run = TimeSeriesRun(

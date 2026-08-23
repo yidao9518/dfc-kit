@@ -26,8 +26,8 @@
    citation metadata, and no private data or local server paths.
 6. Create an annotated version tag only after CI passes.
 
-## Experimental surface
+## Pre-1.0 compatibility
 
-Pre-1.0 releases may revise experimental APIs. NBS is currently experimental;
-stable data, connectivity, state, reference, QC, and paired-inference objects
-should retain backward-compatible field semantics within a minor release.
+Pre-1.0 releases may revise public APIs. Data, connectivity, state, reference,
+Matching, NBS, and paired-inference objects should retain backward-compatible field
+semantics within a minor release.

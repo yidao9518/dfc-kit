@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from dfckit import TimeSeriesDataset, TimeSeriesRun
-from dfckit.io import (
+from dfckit.information import (
     FrozenWindow,
     InformationGroups,
     compute_fixed_information,
@@ -143,7 +143,7 @@ class FixedInformationArtifactTests(unittest.TestCase):
             save_fixed_information(replayed, output)
             self.assertEqual(
                 {path.name for path in output.iterdir()},
-                {"manifest.json", "arrays.npz", "draw_metrics.tsv", "session_metrics.tsv"},
+                {"manifest.json", "arrays.npz"},
             )
             loaded = load_fixed_information(output)
             np.testing.assert_array_equal(
@@ -273,7 +273,7 @@ class FixedInformationArtifactTests(unittest.TestCase):
                 schedule=({"bad": "schedule"},),  # type: ignore[arg-type]
             )
 
-    def test_loader_rejects_array_and_tsv_tampering(self):
+    def test_loader_rejects_array_tampering(self):
         artifact = self._compute()
         with TemporaryDirectory() as temporary:
             output = Path(temporary) / "information.artifact"
@@ -283,26 +283,6 @@ class FixedInformationArtifactTests(unittest.TestCase):
             arrays["mean_mutual_information"][0] += 1.0
             np.savez(output / "arrays.npz", **arrays)
             with self.assertRaisesRegex(ValueError, "mean MI"):
-                load_fixed_information(output)
-
-            output = Path(temporary) / "information-2.artifact"
-            save_fixed_information(artifact, output)
-            rows = (output / "session_metrics.tsv").read_text(encoding="utf-8").splitlines()
-            fields = rows[1].split("\t")
-            fields[6] = "999"
-            rows[1] = "\t".join(fields)
-            (output / "session_metrics.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "session_metrics.tsv row"):
-                load_fixed_information(output)
-
-            output = Path(temporary) / "information-3.artifact"
-            save_fixed_information(artifact, output)
-            rows = (output / "draw_metrics.tsv").read_text(encoding="utf-8").splitlines()
-            fields = rows[1].split("\t")
-            fields[7] = str(int(fields[7]) + 1)
-            rows[1] = "\t".join(fields)
-            (output / "draw_metrics.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "draw_metrics.tsv row"):
                 load_fixed_information(output)
 
     def test_mi_only_artifact_omits_conditional_arrays(self):
@@ -409,10 +389,6 @@ class FixedInformationEligibilityShapeTests(unittest.TestCase):
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["n_cells"], 563)
             self.assertEqual(len(manifest["cells"]), 563)
-            self.assertEqual(
-                len((output / "session_metrics.tsv").read_text(encoding="utf-8").splitlines()),
-                564,
-            )
             self.assertEqual(load_fixed_information(output).n_cells, 563)
 
 

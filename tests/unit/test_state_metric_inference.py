@@ -31,7 +31,6 @@ class StateMetricInferenceTests(unittest.TestCase):
         payload = {
             "n_states": 2,
             "model_kind": "kmeans-state",
-            "model_fingerprint": "a" * 64,
             "source_contract": "window-fc:test",
             "runs": runs,
         }

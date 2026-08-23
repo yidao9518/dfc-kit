@@ -6,18 +6,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import ArrayLike
 
-from ..connectivity import LEiDAResult, WindowFCResult
+from .._arrays import readonly_copy as _readonly
+from ..connectivity import InstantaneousEdgeResult, LEiDAResult, WindowFCResult
 from ..data import TimeSeriesDataset
 
 FeatureKey = tuple[str, ...]
-
-
-def _readonly(values: NDArray) -> NDArray:
-    output = np.asarray(values).copy()
-    output.setflags(write=False)
-    return output
 
 
 @dataclass(frozen=True)
@@ -312,6 +307,37 @@ def leida_sequences(results: Sequence[LEiDAResult]) -> FeatureSequenceDataset:
                     acquisition_id=result.acquisition_id,
                     segment_id=int(segment_id),
                     source_contract=contract,
+                    sample_interval_seconds=result.tr,
+                )
+            )
+    return FeatureSequenceDataset(sequences)
+
+
+def instantaneous_edge_sequences(
+    results: Sequence[InstantaneousEdgeResult],
+) -> FeatureSequenceDataset:
+    """Convert ETS/MTD edge results into the common state-model input."""
+    results = tuple(results)
+    if not results:
+        raise ValueError("at least one InstantaneousEdgeResult is required")
+    sequences: list[FeatureSequence] = []
+    for result in results:
+        if result.subject is None:
+            raise ValueError("instantaneous-edge state modeling requires subject IDs")
+        features = result.require_features()
+        for segment_id in dict.fromkeys(result.segment_ids.tolist()):
+            positions = np.flatnonzero(result.segment_ids == segment_id)
+            sequences.append(
+                FeatureSequence(
+                    values=features[positions],
+                    sample_start_indices=result.sample_start_frames[positions],
+                    sample_end_indices=result.sample_end_frames[positions],
+                    feature_keys=result.feature_keys,
+                    subject=result.subject,
+                    session=result.session,
+                    acquisition_id=result.acquisition_id,
+                    segment_id=int(segment_id),
+                    source_contract=result.source_contract,
                     sample_interval_seconds=result.tr,
                 )
             )

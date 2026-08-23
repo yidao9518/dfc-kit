@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from dfckit import TimeSeriesRun
-from dfckit.connectivity import (
+from dfckit.information import (
     FixedLengthInformation,
     block_information,
     eligible_fixed_window_count,
@@ -165,11 +165,11 @@ class InformationKernelTests(unittest.TestCase):
         self.assertEqual(result.mutual_information.shape, (4, 2, 1))
         self.assertEqual(result.conditional_mutual_information.shape, (4, 2, 1))
 
-    def test_invalid_blocks_metric_and_short_series_are_rejected(self):
+    def test_invalid_blocks_removed_metric_option_and_short_series_are_rejected(self):
         values = np.arange(40, dtype=float).reshape(10, 4)
         with self.assertRaisesRegex(ValueError, "disjoint"):
             block_information(values, [0, 1], [1, 2])
-        with self.assertRaisesRegex(ValueError, "metric"):
+        with self.assertRaisesRegex(TypeError, "unexpected keyword argument 'metric'"):
             knn_mi(values[:, 0], values[:, 1], metric="euclidean")
         with self.assertRaisesRegex(ValueError, r"k \+ 2"):
             knn_mi(values[:5, 0], values[:5, 1], k=3)

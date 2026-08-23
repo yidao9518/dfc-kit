@@ -1,28 +1,41 @@
 # API map
 
-The package exposes immutable result objects alongside composable numerical
-kernels. Import public names from the area that owns the operation.
+`dfc-kit` exposes immutable result objects and composable numerical kernels.
+Public names should be imported from the package area that owns the operation.
 
-## Core data
+## Input and preprocessing
 
 ```python
 from dfckit import TimeSeriesRun, TimeSeriesDataset, validate_subject_disjoint
+from dfckit.io import load_xcpd_run, discover_xcpd_runs
+from dfckit.preprocessing import segment_standardized_samples
 ```
 
-`TimeSeriesRun` carries a frames-by-ROI array, strictly increasing original
-frame indices, ROI names, and optional subject/session/acquisition/TR metadata.
+`TimeSeriesRun` carries ROI time series, original frame indices, and acquisition
+metadata. XCP-D loaders preserve censor gaps. `segment_standardized_samples`
+z-scores each ROI within each uninterrupted retained segment; ETS and CAP use
+this operation.
 
-## XCP-D input
+## Connectivity
 
 ```python
-from dfckit.io import (
-    discover_xcpd_files,
-    discover_xcpd_runs,
-    load_xcpd_dataset,
-    load_xcpd_run,
+from dfckit.connectivity import (
+    ETS,
+    MTD,
+    LEiDA,
+    FixedPartitionGraph,
+    LowRankCovariance,
+    partition_edge_summary,
+    SlidingWindowFC,
 )
+```
 
-from dfckit.io import (
+Each estimator returns feature arrays together with feature keys, frame bounds,
+and segment identifiers. `dfckit.information` contains MI/CMI rather than the
+connectivity namespace:
+
+```python
+from dfckit.information import (
     InformationGroups,
     compute_fixed_information,
     load_fixed_information,
@@ -30,409 +43,74 @@ from dfckit.io import (
 )
 ```
 
-The loader validates atlas identity, coverage, outlier masks, and whether each
-time-series table represents the full or already-censored axis.
-
-For a shell entry point that wraps batch discovery and FeatureStore writers,
-see [Command-line workflows](cli.md).
-
-Fixed-length information workflows use a separate named-group JSON and return
-an atomic artifact that can be loaded without pickle:
+## FeatureStore
 
 ```python
-groups = InformationGroups(
-    left=("left-1", "left-2"),
-    right=("right-1",),
-    conditioning=("condition",),
-)
-artifact = compute_fixed_information(
-    dataset,
-    groups,
-    lengths=(120, 180),
-    draws=20,
-    sample_seed=20260819,
-)
-save_fixed_information(artifact, "results/fixed-information")
-restored = load_fixed_information("results/fixed-information")
-```
-
-## Fitted model artifacts
-
-```python
-from dfckit.io import load_fitted_model, save_fitted_model
-
-path = save_fitted_model(fit.model, "models/state-model")
-restored_model = load_fitted_model(path)
-```
-
-The pickle-free artifact API supports `KMeansStateModel`,
-`StreamingPCAModel`, and `GaussianHMMStateModel`. It preserves feature and fit
-participant identity, refuses overwrite, and validates the complete schema on
-load. See [Fitted model artifacts](model_artifacts.md).
-
-`fitted_model_fingerprint(model)` computes a deterministic SHA-256 identity
-over the model kind, parameters, fitted-subject metadata, algorithm settings,
-and feature/source/time contract. Prediction artifacts use it to prove which
-candidate model generated their labels before state alignment.
-
-Decoded labels use a separate artifact contract:
-
-```python
-from dfckit.io import (
-    StatePredictions,
-    load_state_predictions,
-    save_state_predictions,
-    write_state_metrics,
-)
-
-prediction_path = save_state_predictions(predictions, "predictions/heldout.labels")
-predictions = load_state_predictions(prediction_path)
-metrics_path = write_state_metrics(predictions, "predictions/heldout.metrics.json")
-```
-
-This preserves sequence/acquisition/segment boundaries and original sample
-indices; Gaussian HMM predictions additionally preserve posterior probabilities
-and log likelihood. The command-line equivalents are `predict-states` and
-`summarize-states`.
-
-State alignment mappings also have a pickle-free artifact:
-
-```python
-from dfckit.io import load_state_alignment, save_state_alignment
-
-path = save_state_alignment(alignment, "models/seed-29.alignment")
-restored_alignment = load_state_alignment(path)
-```
-
-## Connectivity
-
-```python
-from dfckit.connectivity import (
-    SlidingWindowFC,
-    MTD,
-    ETS,
-    LEiDA,
-    LowRankCovariance,
-    FixedLengthInformation,
-)
-```
-
-Lower-level functions include `weighted_correlation`, `fisher_z_edges`,
-`cross_block_mtd`, `edge_rss`, `leading_phase_eigenvectors`, subspace geometry,
-`knn_mi`, `knn_cmi`, and fixed-window sampling.
-
-## Networks
-
-```python
-from dfckit.networks import (
-    FixedPartitionGraph,
-    positive_proportional_adjacency,
-    fixed_partition_modularity,
-    participation_coefficient,
-    partition_edge_summary,
-)
-```
-
-Network partitions are supplied by the caller; no atlas or disease-specific
-partition is built into the library.
-
-## States
-
-```python
-from dfckit.states import (
-    fit_kmeans_states,
-    fit_cap_states,
-    fit_gaussian_hmm_states,
-    summarize_state_assignments,
-    align_kmeans_centroids,
-    align_gaussian_hmm_emissions,
-    relabel_kmeans_model,
-    relabel_gaussian_hmm_model,
-)
-```
-
-State feature sequences preserve acquisition and segment identity. Fit-subject overlap checks
-apply to learned scalers, PCA, centroids, emissions, and state labels.
-KMeans and HMM model relabeling applies one candidate-to-reference permutation
-to every state-indexed parameter and decoded output.
-
-## References, QC, and inference
-
-```python
-from dfckit import fit_feature_reference, fit_subspace_reference
-from dfckit.qc import summarize_window_motion, match_within_subject
-from dfckit.inference import (
-    paired_sign_flip,
-    paired_bootstrap_mean_ci,
-    paired_hc3,
-    benjamini_hochberg,
-    paired_nbs,
-)
-```
-
-Inference results record their participant unit, direction, tail, random seed,
-and correction scope. NBS remains explicitly experimental.
-
-## Chunked storage
-
-```python
-from dfckit.storage import (
-    FeatureStore,
-    append_cap,
-    append_ets,
-    append_leida,
-    append_mtd,
-    append_window_fc,
-    write_cap_store,
-    write_ets_store,
-    write_leida_store,
-    write_mtd_store,
-    write_window_fc_store,
-)
-```
-
-The store keeps feature identity, source contract, sample interval, and
-subject/session/acquisition/segment boundaries alongside memory-mappable row chunks.
-
-CAP storage is a separate feature geometry from FC storage:
-
-```python
-cap_store = write_cap_store(
-    "/path/to/cap.store",
-    runs,
-    chunk_size=256,
-)
-append_cap(cap_store, another_run, chunk_size=256)
-```
-
-The CAP writer stores one ROI feature per row sample, standardizes each ROI
-within each uninterrupted retained segment using `ddof=0`, and preserves the
-original frame indices. Its source contract is
-`cap:within-segment-roi-zscore-ddof0`; it does not create connectivity edges.
-Each segment is a separate sequence, so later occupancy, dwell, and transition
-metrics remain gap-safe. Segments shorter than two retained frames are omitted.
-
-LEiDA uses the same ROI feature geometry while retaining its own phase contract:
-
-```python
-from dfckit.connectivity import LEiDA
-
-leida = LEiDA(minimum_segment_length=20)
-leida_store = write_leida_store(
-    "/path/to/leida.store",
-    runs,
-    leida,
-    chunk_size=256,
-)
-append_leida(leida_store, another_run, leida, chunk_size=256)
-```
-
-Every eligible censor-bounded segment is Hilbert transformed independently.
-The store contains oriented leading phase-coherence vectors with one ROI per
-feature; it does not contain the separate phase-block summary measures.
-
-For state fitting without reconstructing all rows in memory:
-
-```python
-from dfckit.outofcore import (
-    fit_kmeans_store_materialized,
-    fit_minibatch_kmeans_store,
-    predict_kmeans_store,
-    score_kmeans_store,
-)
-
-fit = fit_minibatch_kmeans_store(
-    FeatureStore.open("/path/to/window_fc.store"),
-    subjects=("sub-001", "sub-002"),
-    n_states=4,
-    seed=20260818,
-)
-held_out = predict_kmeans_store(fit.model, held_out_store)
-held_out_scores = score_kmeans_store(fit.model, held_out_store)
-```
-
-The streaming fitter keeps the training scaler, centres, and participant
-identities in the same `KMeansStateModel` contract as the in-memory fitter.
-Prediction emits state labels and original sample indices only; participant
-overlap is rejected unless explicitly allowed.
-
-For a historical in-memory KMeans contract, use the materialized adapter:
-
-```python
-fit = fit_kmeans_store_materialized(
-    FeatureStore.open("/path/to/cap.store"),
-    subjects=("sub-001", "sub-002"),
-    n_states=5,
-    seed=20260818,
-    n_init=20,
-    max_iter=300,
-    algorithm="minibatch",
-    standardize_features=False,
-)
-```
-
-Materialized fitting reconstructs the selected store cohort in memory and
-calls one complete scikit-learn `KMeans.fit` (`algorithm="lloyd"`) or
-`MiniBatchKMeans.fit` (`algorithm="minibatch"`). It preserves source/feature
-contracts and the selected-cohort fingerprint but has no bounded-memory
-guarantee. For CAP stores, `standardize_features=False` preserves the
-segment-level ROI z-scoring already encoded in the store; enabling it performs
-an additional pooled scaling pass.
-
-For reduced sequence models, use the streaming PCA and HMM entry points:
-
-```python
-from dfckit.outofcore import fit_incremental_pca_store, iter_pca_store_chunks
-from dfckit.outofcore_hmm import (
-    fit_gaussian_hmm_store,
-    predict_gaussian_hmm_store,
-    score_gaussian_hmm_store,
-)
-
-pca = fit_incremental_pca_store(
-    FeatureStore.open("/path/to/window_fc.store"),
-    n_components=10,
-    subjects=("sub-001", "sub-002"),
-)
-reduced_chunks = iter_pca_store_chunks(pca, FeatureStore.open("/path/to/heldout.store"))
-hmm_fit = fit_gaussian_hmm_store(
-    FeatureStore.open("/path/to/window_fc.store"),
-    n_states=5,
-    n_pca_components=10,
-    seed=20260818,
-)
-heldout_states = predict_gaussian_hmm_store(hmm_fit.model, heldout_store)
-heldout_scores = score_gaussian_hmm_store(hmm_fit.model, heldout_store)
-```
-
-The HMM path materializes only the reduced observations passed to `hmmlearn`;
-each stored sequence remains a separate length in the likelihood and decoding
-calls.
-
-The scoring functions return acquisition-level standardized KMeans
-quantization error or Gaussian-HMM log likelihood. The HMM path scores each
-censor segment separately before run aggregation. Use
-`dfckit.io.write_state_model_scores` for strict JSON provenance or the
-`score-states` CLI for the complete workflow.
-
-For cross-fold state-count selection:
-
-```python
-from dfckit.io import compare_state_model_scores, load_state_model_scores
-
-reports = [load_state_model_scores(path) for path in score_paths]
-selection = compare_state_model_scores(reports, score_artifacts=score_paths)
-print(selection.selection.one_standard_error_n_states)
-```
-
-This API requires v2 score artifacts, a complete and identical
-candidate-by-seed grid in every fold, identical model contracts, and mutually
-exclusive validation participants. Runs are sample-weighted within participant
-and seed; seeds, participants, and folds are then weighted equally in that
-order. Uncertainty is estimated across folds only. See
-[Cross-fold state-count selection](state_selection.md).
-
-To construct the same balanced participant folds used by the automated CLI:
-
-```python
-from dfckit.states import make_subject_validation_folds
-
-folds = make_subject_validation_folds(subjects, n_folds=5, seed=20260818)
-for fold in folds:
-    fit_on(fold.fit_subjects)
-    score_on(fold.evaluation_subjects)
-```
-
-Assignment is determined by a stable SHA-256 ranking of the split seed and
-subject label. Every participant appears in exactly one evaluation fold, and
-all of that participant's sessions and acquisitions remain together.
-
-Automated inner workflows can be reconstructed before a custom outer
-evaluation:
-
-```python
-from dfckit.io import load_state_count_cross_validation
-
-workflow = load_state_count_cross_validation("results/k-selection")
-selected_k = workflow.selected_n_states("one-standard-error")
-development_subjects = workflow.development_subjects
-model_seeds = workflow.model_seeds
-```
-
-The loader reopens every model and score, rebuilds the comparison, and verifies
-the manifest, split, grid, paths, and fingerprints. The
-`evaluate-selected-state-count` CLI is the supported complete refit-and-score
-adapter. For custom workflows,
-`selected_state_count_evaluation_payload` and
-`write_selected_state_count_evaluation` provide the same strict hierarchical
-evaluation JSON contract after models have been fitted and scored.
-
-Completed outer evaluations and complete nested workflows can be audited after
-they have been moved:
-
-```python
-from dfckit.io import (
-    load_nested_state_count_cross_validation,
-    load_selected_state_count_evaluation,
-)
-
-outer = load_selected_state_count_evaluation("results/outer-evaluation")
-nested = load_nested_state_count_cross_validation("results/nested-k")
-print(outer.cohort_score, nested.cohort_score)
-```
-
-Both loaders reconstruct summaries from the referenced models and held-out
-scores. The nested loader additionally rebuilds every inner selection and
-checks that each participant enters exactly one outer test fold. The
-`nested-cross-validate-state-counts --checkpoint` CLI option is the supported
-resumable executor; the checkpoint manifest is an internal workflow contract,
-not a result artifact. See
-[Nested state-count cross-validation](nested_cross_validation.md).
-
-For a read-only progress audit tied to the current FeatureStore:
-
-```python
-from dfckit.io import (
-    inspect_nested_state_count_progress,
-    nested_state_count_progress_payload,
-)
 from dfckit.storage import FeatureStore
 
-store = FeatureStore.open("features/window-fc.store")
-progress = inspect_nested_state_count_progress(
-    store,
-    "results/nested-k.checkpoint",
+store = FeatureStore.create(
+    "results/window-fc.store",
+    feature_keys=result.feature_keys,
+    source_contract=result.source_contract,
+    sample_interval_seconds=result.sample_interval_seconds,
 )
-print(progress.status, progress.fit_completion_fraction)
-print(progress.execution_status, progress.lock_owner_pid)
-print(nested_state_count_progress_payload(progress)["folds"])
+store.append_dataset(dataset)
 ```
 
-Validated inner models count toward fit progress even when their scores are
-still pending; completed score counts are reported separately. The function
-never cleans or resumes a checkpoint and rejects current-data drift, child
-tampering, or symlinks before returning an immutable summary.
-Execution state is independent of artifact completion: it reports whether the
-checkpoint is actively owned, idle after release, stale after an unclean exit,
-or backed by an invalid owner record. The inspector does not reclaim stale
-ownership; the next checkpoint writer does so only after acquiring the
-operating-system lock.
+FeatureStore chunks are memory-mappable and retain sequence/acquisition
+boundaries. They are an execution format, not a provenance database.
 
-For a store-fitted model, reconstruct an original-space covariance one state at
-a time with `dfckit.states.reconstruct_emission_covariance`; the default model
-does not allocate the full high-dimensional covariance tensor.
-
-## Repeated-fit stability
+## State models
 
 ```python
-from dfckit.io import write_state_stability
-from dfckit.states import summarize_state_stability
+from dfckit.states.streaming import fit_minibatch_kmeans_store
+from dfckit.states.streaming_hmm import fit_gaussian_hmm_store
+from dfckit.artifacts import load_fitted_model, save_fitted_model
 
-runs = summarize_state_stability(reference_numbered_assignments)
-write_state_stability(runs, "results/stability.json", **model_identity)
+fit = fit_minibatch_kmeans_store(store, n_states=4, seed=17)
+save_fitted_model(fit.model, "models/k4.model")
 ```
 
-The low-level function accepts assignments already mapped to one reference
-numbering and checks exact sequence/sample boundaries. The CLI normally
-performs model decoding and alignment before calling it. See
-[Repeated-fit state stability](state_stability.md).
+`KMeansStateModel` uses K as the number of cluster centers. In
+`GaussianHMMStateModel`, K is the number of hidden states. Model artifacts are
+JSON plus NumPy arrays and validate shapes, finite values, feature keys, and
+model parameters on load.
+
+## State summaries and alignment
+
+```python
+from dfckit.states import summarize_state_assignments
+from dfckit.states.alignment import align_kmeans_centroids
+from dfckit.artifacts import save_state_alignment
+```
+
+Occupancy, dwell, switch, and transition metrics are computed separately for
+each acquisition and censor-bounded sequence. Hungarian alignment is required
+before combining repeated fits; choose Euclidean or Pearson cost explicitly.
+
+## State-count selection
+
+```python
+from dfckit.artifacts import load_state_model_scores
+from dfckit.states import compare_state_model_scores
+
+reports = [load_state_model_scores(path) for path in score_paths]
+comparison = compare_state_model_scores(reports)
+print(comparison.selection.best_n_states)
+print(comparison.selection.one_standard_error_n_states)
+```
+
+The function compares held-out scores across subject-disjoint folds. It keeps
+the statistical essentials—held-out data, candidate K, model family, fold
+membership, and subject-balanced aggregation—without requiring workflow
+directories or nested artifact loaders.
+
+## Inference
+
+```python
+from dfckit.inference import ols_hc3, paired_hc3, paired_nbs, paired_sign_flip
+```
+
+Inference modules provide paired sign flips, bootstrap intervals, HC3 models,
+declared-family FDR, and paired NBS. These are independent of state-count
+selection and model persistence.

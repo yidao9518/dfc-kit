@@ -5,8 +5,8 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from dfckit import TimeSeriesDataset, TimeSeriesRun
-from dfckit.information_summary import summarize_information_artifact
-from dfckit.io import InformationGroups, compute_fixed_information, save_fixed_information
+from dfckit.information import InformationGroups, compute_fixed_information, save_fixed_information
+from dfckit.information.summary import summarize_information_artifact
 
 
 class InformationSummaryTests(unittest.TestCase):

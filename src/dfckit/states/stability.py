@@ -8,7 +8,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from .data import StateAssignments, _readonly
+from .._arrays import readonly_copy as _readonly
+from .data import StateAssignments
 from .metrics import RunStateMetrics, summarize_state_assignments
 
 
