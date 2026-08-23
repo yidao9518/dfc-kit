@@ -16,9 +16,9 @@ import numpy as np
 
 from dfckit import TimeSeriesRun
 from dfckit.connectivity import ETS, LowRankCovariance, SlidingWindowFC
+from dfckit.states import fit_kmeans_states, window_fc_sequences
 from dfckit.states.streaming import fit_minibatch_kmeans_store
 from dfckit.states.streaming_hmm import fit_gaussian_hmm_store
-from dfckit.states import fit_kmeans_states, window_fc_sequences
 from dfckit.storage import write_instantaneous_edge_store, write_window_fc_store
 
 
