@@ -10,8 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from .multiple_testing import benjamini_hochberg
-from .paired import paired_bootstrap_mean_ci, paired_sign_flip
+from .endpoints import _adjust_endpoint_pvalues, _paired_endpoint_result
 
 SUPPORTED_STATE_METRICS = frozenset(
     {"occupancy", "mean_dwell_seconds", "switch_rate", "transition_probabilities"}
@@ -68,6 +67,7 @@ def infer_paired_state_metrics(
     n_bootstrap: int = 10_000,
     seed: int = 0,
     exact: bool = False,
+    within_condition_aggregation: str = "error",
 ) -> dict[str, Any]:
     """Test condition A minus condition B for each selected state endpoint."""
     if not condition_a or not condition_b or condition_a == condition_b:
@@ -79,10 +79,12 @@ def infer_paired_state_metrics(
         raise ValueError(f"unsupported state metrics: {unsupported}")
     if not fdr_family.strip():
         raise ValueError("fdr_family must be a non-empty prespecified family")
+    if within_condition_aggregation not in {"error", "mean"}:
+        raise ValueError("within_condition_aggregation must be 'error' or 'mean'")
     if not np.isfinite(alpha) or not 0.0 < alpha < 1.0:
         raise ValueError("alpha must lie strictly between zero and one")
     n_states = int(metrics_payload["n_states"])
-    by_subject: dict[str, dict[str, dict[str, float]]] = {}
+    by_endpoint: dict[str, dict[str, dict[str, dict[str, float]]]] = {}
     for raw in metrics_payload["runs"]:
         if not isinstance(raw, dict):
             raise TypeError("state metrics runs must contain JSON objects")
@@ -92,9 +94,26 @@ def infer_paired_state_metrics(
             raise TypeError("paired state inference requires subject and session labels")
         if session not in {condition_a, condition_b}:
             continue
-        if session in by_subject.setdefault(subject, {}):
-            raise ValueError(f"subject {subject!r} has duplicate runs for condition {session!r}")
-        by_subject[subject][session] = _endpoints(raw, metrics, n_states)
+        acquisition_id = raw.get("acquisition_id")
+        acquisition_key = (
+            acquisition_id
+            if isinstance(acquisition_id, str) and acquisition_id
+            else "<unspecified>"
+        )
+        for endpoint, value in _endpoints(raw, metrics, n_states).items():
+            acquisitions = (
+                by_endpoint.setdefault(endpoint, {}).setdefault(subject, {}).setdefault(session, {})
+            )
+            if acquisitions and within_condition_aggregation == "error":
+                raise ValueError(
+                    f"subject {subject!r} has duplicate runs for condition {session!r}"
+                )
+            if acquisition_key in acquisitions:
+                raise ValueError(
+                    f"subject {subject!r} condition {session!r} endpoint {endpoint!r} "
+                    f"has duplicate acquisition {acquisition_key!r}"
+                )
+            acquisitions[acquisition_key] = value
 
     endpoint_names = []
     for metric in metrics:
@@ -109,102 +128,23 @@ def infer_paired_state_metrics(
         else:
             endpoint_names.extend(f"{metric}.state_{state}" for state in range(n_states))
     endpoint_names.sort()
-    results: list[dict[str, Any]] = []
-    tested_indices: list[int] = []
-    pvalues: list[float] = []
-    for endpoint_index, endpoint in enumerate(endpoint_names):
-        subjects = tuple(
-            subject
-            for subject in sorted(by_subject)
-            if endpoint in by_subject[subject].get(condition_a, {})
-            and endpoint in by_subject[subject].get(condition_b, {})
+    # Include absent canonical endpoints in the seed axis, as in the state contract.
+    results = [
+        _paired_endpoint_result(
+            by_endpoint.get(endpoint, {}),
+            endpoint=endpoint,
+            condition_a=condition_a,
+            condition_b=condition_b,
+            endpoint_index=endpoint_index,
+            seed=seed,
+            exact=exact,
+            n_permutations=n_permutations,
+            n_bootstrap=n_bootstrap,
+            errors_as_not_testable=True,
         )
-        if len(subjects) < 2:
-            results.append(
-                {
-                    "endpoint": endpoint,
-                    "n": len(subjects),
-                    "estimate": None,
-                    "ci_low": None,
-                    "ci_high": None,
-                    "p": None,
-                    "q": None,
-                    "direction": None,
-                    "result_status": "not_testable",
-                    "reason": "fewer than two complete participant pairs",
-                }
-            )
-            continue
-        differences = np.asarray(
-            [
-                by_subject[subject][condition_a][endpoint]
-                - by_subject[subject][condition_b][endpoint]
-                for subject in subjects
-            ],
-            dtype=float,
-        )
-        try:
-            test = paired_sign_flip(
-                differences,
-                subjects,
-                n_permutations=n_permutations,
-                seed=None if exact else seed + endpoint_index,
-                exact=exact,
-            )
-            interval = paired_bootstrap_mean_ci(
-                differences,
-                subjects,
-                n_resamples=n_bootstrap,
-                seed=seed + 100_000 + endpoint_index,
-            )
-        except ValueError as error:
-            results.append(
-                {
-                    "endpoint": endpoint,
-                    "n": len(subjects),
-                    "estimate": None,
-                    "ci_low": None,
-                    "ci_high": None,
-                    "p": None,
-                    "q": None,
-                    "direction": None,
-                    "result_status": "not_testable",
-                    "reason": str(error),
-                }
-            )
-            continue
-        estimate = test.estimate
-        results.append(
-            {
-                "endpoint": endpoint,
-                "n": len(subjects),
-                "estimate": estimate,
-                "ci_low": interval.lower,
-                "ci_high": interval.upper,
-                "p": test.pvalue,
-                "q": None,
-                "direction": (
-                    f"{condition_a}_higher"
-                    if estimate > 0.0
-                    else f"{condition_a}_lower"
-                    if estimate < 0.0
-                    else "no_difference"
-                ),
-                "result_status": None,
-                "reason": None,
-            }
-        )
-        tested_indices.append(len(results) - 1)
-        pvalues.append(test.pvalue)
-    if pvalues:
-        correction = benjamini_hochberg(pvalues, family=fdr_family)
-        for result_index, qvalue in zip(
-            tested_indices, correction.adjusted_pvalues, strict=True
-        ):
-            results[result_index]["q"] = float(qvalue)
-            results[result_index]["result_status"] = (
-                "positive" if qvalue < alpha else "negative"
-            )
+        for endpoint_index, endpoint in enumerate(endpoint_names)
+    ]
+    n_tested = _adjust_endpoint_pvalues(results, family=fdr_family, alpha=alpha)
     return {
         "format": "dfc-kit-paired-state-inference",
         "format_version": 1,
@@ -220,11 +160,12 @@ def infer_paired_state_metrics(
         "n_bootstrap": n_bootstrap,
         "seed": seed,
         "exact": exact,
+        "within_condition_aggregation": within_condition_aggregation,
         "fdr_family": fdr_family,
         "fdr_method": "benjamini-hochberg",
         "alpha": alpha,
         "n_endpoints": len(results),
-        "n_tested": len(tested_indices),
+        "n_tested": n_tested,
         "results": results,
     }
 
@@ -252,6 +193,10 @@ def _write_paired_state_inference(payload: dict[str, Any], path: str | Path) -> 
             "p",
             "q",
             "direction",
+            "condition_a_acquisitions_min",
+            "condition_a_acquisitions_max",
+            "condition_b_acquisitions_min",
+            "condition_b_acquisitions_max",
             "result_status",
             "reason",
         )

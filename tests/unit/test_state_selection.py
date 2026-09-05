@@ -64,20 +64,19 @@ class StateCountSelectionTests(unittest.TestCase):
                 higher_is_better=False,
             )
 
-    def test_derived_statistics_and_decisions_cannot_be_tampered(self):
+    def test_derived_statistics_are_readonly_and_recomputed_after_input_changes(self):
         result = select_state_count(
             [[1.0, 0.9, 0.8], [1.1, 0.95, 0.85]],
             [2, 4, 6],
             higher_is_better=False,
         )
-        changed_means = result.mean_scores.copy()
-        changed_means[0] += 0.1
-        with self.assertRaisesRegex(ValueError, "means disagree"):
-            replace(result, mean_scores=changed_means)
-        with self.assertRaisesRegex(ValueError, "best state count disagrees"):
+        with self.assertRaises(ValueError):
+            result.mean_scores[0] += 0.1
+        with self.assertRaisesRegex((TypeError, ValueError), "init=False"):
             replace(result, best_n_states=2)
-        with self.assertRaisesRegex(ValueError, "disagree"):
-            replace(result, higher_is_better=True)
+        reversed_direction = replace(result, higher_is_better=True)
+        self.assertEqual(reversed_direction.best_n_states, 2)
+        np.testing.assert_array_equal(reversed_direction.mean_scores, result.mean_scores)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -253,6 +253,60 @@ def subject_balanced_quantiles(
             right=sorted_values[-1],
         )
     )
+
+
+def hierarchical_balanced_quantiles(
+    values: ArrayLike,
+    group_levels: Iterable[Iterable[Hashable]],
+    probabilities: Iterable[float],
+) -> NDArray[np.float64]:
+    """Return inverse-ECDF quantiles with equal weight at each group level.
+
+    For levels such as ``(subject, acquisition)``, every subject receives equal
+    total weight, acquisitions receive equal weight within their subject, and
+    observations receive equal weight within their acquisition.
+    """
+    samples = np.asarray(values, dtype=float)
+    if samples.ndim != 1 or not len(samples) or not np.isfinite(samples).all():
+        raise ValueError("values must be a non-empty finite one-dimensional array")
+    levels = tuple(tuple(level) for level in group_levels)
+    if not levels:
+        raise ValueError("group_levels must contain at least one grouping level")
+    if any(len(level) != len(samples) for level in levels):
+        raise ValueError("every grouping level must identify every observation")
+    paths = tuple(tuple(level[index] for level in levels) for index in range(len(samples)))
+    try:
+        for path in paths:
+            hash(path)
+    except TypeError as error:
+        raise TypeError("group levels must contain hashable labels") from error
+
+    requested = np.asarray(tuple(probabilities), dtype=float)
+    if requested.ndim != 1 or not len(requested):
+        raise ValueError("probabilities must be a non-empty one-dimensional collection")
+    if not np.isfinite(requested).all() or np.any((requested < 0.0) | (requested > 1.0)):
+        raise ValueError("probabilities must be finite and within [0, 1]")
+
+    weights = np.ones(len(samples), dtype=float)
+    for depth in range(len(levels)):
+        children: dict[tuple[Hashable, ...], set[Hashable]] = {}
+        for path in paths:
+            children.setdefault(path[:depth], set()).add(path[depth])
+        for index, path in enumerate(paths):
+            weights[index] /= len(children[path[:depth]])
+    leaf_counts: dict[tuple[Hashable, ...], int] = {}
+    for path in paths:
+        leaf_counts[path] = leaf_counts.get(path, 0) + 1
+    for index, path in enumerate(paths):
+        weights[index] /= leaf_counts[path]
+
+    order = np.argsort(samples, kind="stable")
+    ordered_values = samples[order]
+    cumulative = np.cumsum(weights[order])
+    cumulative /= cumulative[-1]
+    indices = np.searchsorted(cumulative, requested, side="left")
+    indices = np.minimum(indices, len(ordered_values) - 1)
+    return _readonly(ordered_values[indices])
 
 
 def fit_subspace_reference(

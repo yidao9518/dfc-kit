@@ -15,6 +15,19 @@ from ..data import TimeSeriesDataset
 FeatureKey = tuple[str, ...]
 
 
+def _require_matching_feature_space(reference, candidate, *, label: str) -> None:
+    """Check the same feature coordinates for in-memory and stored model input."""
+    if reference.feature_keys != candidate.feature_keys:
+        raise ValueError(f"{label} requires matching feature identities and order")
+    if reference.source_contract != candidate.source_contract:
+        raise ValueError(f"{label} requires matching source contracts")
+    left, right = reference.sample_interval_seconds, candidate.sample_interval_seconds
+    if (left is None) != (right is None) or (
+        left is not None and right is not None and not np.isclose(left, right, rtol=0.0, atol=1e-9)
+    ):
+        raise ValueError(f"{label} requires matching sample intervals")
+
+
 @dataclass(frozen=True)
 class FeatureSequence:
     """One uninterrupted sequence of samples in a common feature space."""
@@ -241,6 +254,25 @@ class StateAssignments:
         object.__setattr__(self, "source_contract", str(self.source_contract))
 
 
+def _segment_feature_sequences(
+    source, values, starts, ends, segment_ids, *, feature_keys, source_contract, interval
+) -> list[FeatureSequence]:
+    """Build the same state-input records for each method's retained segments."""
+    if source.subject is None:
+        raise ValueError("state modeling requires subject IDs")
+    return [
+        FeatureSequence(
+            values=values[positions], sample_start_indices=starts[positions],
+            sample_end_indices=ends[positions], feature_keys=feature_keys,
+            subject=source.subject, session=source.session, acquisition_id=source.acquisition_id,
+            segment_id=int(segment_id), source_contract=source_contract,
+            sample_interval_seconds=interval,
+        )
+        for segment_id in dict.fromkeys(segment_ids.tolist())
+        for positions in (np.flatnonzero(segment_ids == segment_id),)
+    ]
+
+
 def window_fc_sequences(results: Sequence[WindowFCResult]) -> FeatureSequenceDataset:
     """Convert sliding-window outputs into one feature sequence per segment."""
     results = tuple(results)
@@ -257,24 +289,13 @@ def window_fc_sequences(results: Sequence[WindowFCResult]) -> FeatureSequenceDat
         contract = (
             f"window-fc:length={result.length};step={result.step};taper={result.taper}"
         )
-        for segment_id in dict.fromkeys(result.segment_ids.tolist()):
-            positions = np.flatnonzero(result.segment_ids == segment_id)
-            sequences.append(
-                FeatureSequence(
-                    values=result.features[positions],
-                    sample_start_indices=result.start_frames[positions],
-                    sample_end_indices=result.end_frames[positions],
-                    feature_keys=keys,
-                    subject=result.subject,
-                    session=result.session,
-                    acquisition_id=result.acquisition_id,
-                    segment_id=int(segment_id),
-                    source_contract=contract,
-                    sample_interval_seconds=(
-                        None if result.tr is None else result.step * result.tr
-                    ),
-                )
+        sequences.extend(
+            _segment_feature_sequences(
+                result, result.features, result.start_frames, result.end_frames, result.segment_ids,
+                feature_keys=keys, source_contract=contract,
+                interval=None if result.tr is None else result.step * result.tr,
             )
+        )
     return FeatureSequenceDataset(sequences)
 
 
@@ -293,23 +314,12 @@ def leida_sequences(results: Sequence[LEiDAResult]) -> FeatureSequenceDataset:
             f"minimum-segment-length={result.minimum_segment_length};"
             f"orientation={result.orientation}"
         )
-        for segment_id in dict.fromkeys(result.segment_ids.tolist()):
-            positions = np.flatnonzero(result.segment_ids == segment_id)
-            original = result.original_indices[positions]
-            sequences.append(
-                FeatureSequence(
-                    values=result.leading_vectors[positions],
-                    sample_start_indices=original,
-                    sample_end_indices=original,
-                    feature_keys=keys,
-                    subject=result.subject,
-                    session=result.session,
-                    acquisition_id=result.acquisition_id,
-                    segment_id=int(segment_id),
-                    source_contract=contract,
-                    sample_interval_seconds=result.tr,
-                )
+        sequences.extend(
+            _segment_feature_sequences(
+                result, result.leading_vectors, result.original_indices, result.original_indices,
+                result.segment_ids, feature_keys=keys, source_contract=contract, interval=result.tr,
             )
+        )
     return FeatureSequenceDataset(sequences)
 
 
@@ -325,22 +335,13 @@ def instantaneous_edge_sequences(
         if result.subject is None:
             raise ValueError("instantaneous-edge state modeling requires subject IDs")
         features = result.require_features()
-        for segment_id in dict.fromkeys(result.segment_ids.tolist()):
-            positions = np.flatnonzero(result.segment_ids == segment_id)
-            sequences.append(
-                FeatureSequence(
-                    values=features[positions],
-                    sample_start_indices=result.sample_start_frames[positions],
-                    sample_end_indices=result.sample_end_frames[positions],
-                    feature_keys=result.feature_keys,
-                    subject=result.subject,
-                    session=result.session,
-                    acquisition_id=result.acquisition_id,
-                    segment_id=int(segment_id),
-                    source_contract=result.source_contract,
-                    sample_interval_seconds=result.tr,
-                )
+        sequences.extend(
+            _segment_feature_sequences(
+                result, features, result.sample_start_frames, result.sample_end_frames,
+                result.segment_ids, feature_keys=result.feature_keys,
+                source_contract=result.source_contract, interval=result.tr,
             )
+        )
     return FeatureSequenceDataset(sequences)
 
 

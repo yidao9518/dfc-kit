@@ -96,7 +96,11 @@ test_assignments = predict_kmeans_store(fit.model, held_out_store)
 
 This path uses memory-mapped chunks, streaming standardization, deterministic
 uniform-row k-means++ initialization, and participant-safe prediction. It
-does not materialize a `FeatureSequenceDataset` during fitting.
+does not materialize a `FeatureSequenceDataset` during fitting. By default,
+each initialization stops after three consecutive complete-store passes with
+relative center drift at or below `1e-4`, once at least two passes have run.
+`max_iter` is the upper bound; use `convergence_tol=0` when a fixed number of
+passes is required.
 
 The same store boundary is available for Gaussian HMMs through
 `dfckit.states.streaming_hmm`. It first learns IncrementalPCA on eligible sequences,

@@ -1,7 +1,9 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
+from dfckit.inference import nbs as nbs_module
 from dfckit.inference import paired_nbs
 from dfckit.inference.nbs import _intercept_t_statistic, _threshold_components
 
@@ -15,12 +17,8 @@ class NBSComponentTests(unittest.TestCase):
 
         self.assertEqual(components["positive"][0].node_indices, (0, 1, 2))
         self.assertEqual(components["negative"][0].node_indices, (0, 2, 3))
-        self.assertTrue(
-            np.all(statistics[list(components["positive"][0].edge_indices)] >= 2.0)
-        )
-        self.assertTrue(
-            np.all(statistics[list(components["negative"][0].edge_indices)] <= -2.0)
-        )
+        self.assertTrue(np.all(statistics[list(components["positive"][0].edge_indices)] >= 2.0))
+        self.assertTrue(np.all(statistics[list(components["negative"][0].edge_indices)] <= -2.0))
 
     def test_pooled_mode_joins_adjacent_opposite_sign_edges(self):
         edge_i, edge_j = np.triu_indices(4, 1)
@@ -74,16 +72,12 @@ class NBSComponentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "edge_i < edge_j"):
             _threshold_components([3.0], [1], [0], 3, 2.0)
         with self.assertRaisesRegex(ValueError, "component_sign_mode"):
-            _threshold_components(
-                [3.0], [0], [1], 2, 2.0, component_sign_mode="unknown"
-            )
+            _threshold_components([3.0], [0], [1], 2, 2.0, component_sign_mode="unknown")
 
     def test_edges_exactly_at_cutoff_are_not_suprathreshold(self):
         edge_i, edge_j = np.triu_indices(3, 1)
 
-        components = _threshold_components(
-            [2.0, -2.0, 2.000001], edge_i, edge_j, 3, 2.0
-        )
+        components = _threshold_components([2.0, -2.0, 2.000001], edge_i, edge_j, 3, 2.0)
 
         self.assertEqual(components["negative"], ())
         self.assertEqual(components["positive"][0].edge_indices, (2,))
@@ -130,6 +124,13 @@ class PairedNBSTests(unittest.TestCase):
         self.assertEqual(first.permutation_unit, "participant complete edge vector")
         self.assertIn("no correction", first.threshold_correction)
 
+    def test_graph_validation_is_per_call_not_per_permutation_and_threshold(self):
+        with patch.object(
+            nbs_module, "_validated_edge_data", wraps=nbs_module._validated_edge_data
+        ) as validate:
+            self._run(thresholds=(1.0, 2.0, 3.0))
+        self.assertEqual(validate.call_count, 1)
+
     def test_explicit_separate_mode_matches_default(self):
         default = self._run()
         explicit = self._run(component_sign_mode="separate")
@@ -146,9 +147,7 @@ class PairedNBSTests(unittest.TestCase):
             )
 
     def test_pooled_mode_has_its_own_null_and_plus_one_pvalues(self):
-        pooled_result = self._run(
-            thresholds=(1.5,), component_sign_mode="pooled"
-        )
+        pooled_result = self._run(thresholds=(1.5,), component_sign_mode="pooled")
         pooled = pooled_result.at_threshold(1.5)
         separate = self._run(thresholds=(1.5,)).at_threshold(1.5)
 
@@ -159,24 +158,18 @@ class PairedNBSTests(unittest.TestCase):
         self.assertIsNone(pooled.null_positive)
         self.assertIsNone(pooled.null_negative)
         np.testing.assert_array_equal(pooled.null_maximum, pooled.null_pooled)
-        self.assertTrue(
-            np.all(pooled.null_maximum >= separate.null_maximum)
-        )
+        self.assertTrue(np.all(pooled.null_maximum >= separate.null_maximum))
         self.assertTrue(np.any(pooled.null_maximum > separate.null_maximum))
         for component in pooled.components:
-            expected = (
-                1
-                + np.count_nonzero(
-                    pooled.null_maximum >= component.statistic_value
-                )
-            ) / 81
+            expected = (1 + np.count_nonzero(pooled.null_maximum >= component.statistic_value)) / 81
             self.assertEqual(component.direction, "pooled")
             self.assertEqual(component.fwe_pvalue, expected)
 
     def test_pooled_mode_rejects_one_sided_alternatives(self):
         for alternative in ("greater", "less"):
-            with self.subTest(alternative=alternative), self.assertRaisesRegex(
-                ValueError, "requires"
+            with (
+                self.subTest(alternative=alternative),
+                self.assertRaisesRegex(ValueError, "requires"),
             ):
                 self._run(component_sign_mode="pooled", alternative=alternative)
 
@@ -217,9 +210,9 @@ class PairedNBSTests(unittest.TestCase):
         result = self._run(thresholds=(1.5,))
         threshold = result.at_threshold(1.5)
         for component in threshold.components:
-            expected = (1 + np.count_nonzero(
-                threshold.null_maximum >= component.statistic_value
-            )) / 81
+            expected = (
+                1 + np.count_nonzero(threshold.null_maximum >= component.statistic_value)
+            ) / 81
             self.assertEqual(component.fwe_pvalue, expected)
 
     def test_t_statistic_matches_direct_intercept_only_formula(self):

@@ -48,6 +48,10 @@ For observations from the fitted reference participants,
 participant and removes every observation from that participant before scoring
 them. `subject_balanced_quantiles` gives each participant total weight one and
 is suitable for thresholds derived from unequal numbers of windows.
+`hierarchical_balanced_quantiles` adds explicit nested levels. For example,
+levels `(subject, acquisition)` give subjects equal total weight, acquisitions
+equal weight within subject, and windows equal weight within acquisition; its
+quantiles use the left-continuous inverse empirical CDF.
 
 ## Subspace references
 

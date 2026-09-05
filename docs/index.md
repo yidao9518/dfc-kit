@@ -26,8 +26,9 @@ The toolkit is organized around four public layers:
 - **State models:** CAP, KMeans, Gaussian HMMs, state alignment, held-out
   scoring, repeated-fit stability, and participant-disjoint state-count
   selection.
-- **Inference and persistence:** paired inference, covariate matching,
-  paired NBS, memory-mapped FeatureStores, and portable model artifacts.
+- **Inference and persistence:** paired and independent-group inference,
+  covariate matching, paired NBS, memory-mapped FeatureStores, and portable
+  model artifacts.
 
 ## Scope
 

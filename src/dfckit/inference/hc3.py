@@ -110,6 +110,47 @@ class PairedHC3Result:
     estimand: str
 
 
+def _student_t_critical_value(confidence: float, degrees_of_freedom: int) -> float:
+    if isinstance(confidence, (bool, np.bool_)) or not isinstance(
+        confidence, (int, float)
+    ):
+        raise TypeError("confidence must be a number")
+    value = float(confidence)
+    if not np.isfinite(value) or not 0.0 < value < 1.0:
+        raise ValueError("confidence must be finite and strictly between zero and one")
+    if degrees_of_freedom < 1:
+        raise ValueError("degrees_of_freedom must be positive")
+    target_probability = 1.0 - value
+    lower = 0.0
+    upper = 1.0
+    while _student_t_two_sided_p(upper, degrees_of_freedom) > target_probability:
+        lower = upper
+        upper *= 2.0
+    for _ in range(80):
+        midpoint = (lower + upper) / 2.0
+        if _student_t_two_sided_p(midpoint, degrees_of_freedom) > target_probability:
+            lower = midpoint
+        else:
+            upper = midpoint
+    return (lower + upper) / 2.0
+
+
+def hc3_confidence_interval(
+    result: HC3Result,
+    *,
+    confidence: float = 0.95,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return two-sided Student-t intervals for every HC3 coefficient."""
+    if not isinstance(result, HC3Result):
+        raise TypeError("result must be an HC3Result")
+    critical = _student_t_critical_value(confidence, result.degrees_of_freedom)
+    half_width = critical * result.standard_errors
+    return (
+        _readonly(result.coefficients - half_width),
+        _readonly(result.coefficients + half_width),
+    )
+
+
 def ols_hc3(
     outcome: ArrayLike,
     design: ArrayLike,

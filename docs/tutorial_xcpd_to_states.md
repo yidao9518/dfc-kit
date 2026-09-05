@@ -254,6 +254,8 @@ test_metrics = summarize_state_assignments(test_assignments)
 The streaming fitter estimates the pooled scaler with a bounded-memory Welford
 pass, initializes candidates from a deterministic uniform sample, and selects
 the best MiniBatchKMeans initialization by a full training-store inertia pass.
+`max_iter` is an upper bound on complete store passes; pass-level center-drift
+convergence stops stable initializations earlier by default.
 It emits labels and original sample indices only; the complete edge matrix is
 never reconstructed. Prediction rejects any training participant accidentally
 present in the test store.

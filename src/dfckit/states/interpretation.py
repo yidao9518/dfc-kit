@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from ..artifacts import load_fitted_model
+from ..artifacts._json import write_json_atomic
 from ..storage import FeatureStore
 from ..storage._statistics import store_feature_moments
 from .hmm import GaussianHMMStateModel
@@ -247,21 +247,7 @@ def describe_state_artifacts(
 
 
 def write_state_description(payload: Mapping[str, Any], path: str | Path) -> Path:
-    target = Path(path)
-    if target.exists() or target.is_symlink():
-        raise FileExistsError(f"state-description output already exists: {target}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.tmp-{os.getpid()}")
-    try:
-        temporary.write_text(
-            json.dumps(dict(payload), indent=2, sort_keys=True, allow_nan=False) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, target)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
-    return target
+    return write_json_atomic(path, dict(payload))
 
 
 __all__ = [

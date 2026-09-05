@@ -4,6 +4,7 @@ import numpy as np
 
 from dfckit.inference import (
     benjamini_hochberg,
+    hc3_confidence_interval,
     ols_hc3,
     paired_bootstrap_mean_ci,
     paired_hc3,
@@ -93,6 +94,12 @@ class HC3Tests(unittest.TestCase):
         np.testing.assert_allclose(result.statistics, [1.0])
         np.testing.assert_allclose(result.pvalues, [0.42264973081037427], rtol=1e-12)
         self.assertEqual(result.degrees_of_freedom, 2)
+
+        lower, upper = hc3_confidence_interval(result)
+        critical = (upper[0] - result.coefficients[0]) / result.standard_errors[0]
+        self.assertAlmostEqual(critical, 4.302652729749, places=10)
+        self.assertLess(lower[0], result.coefficients[0])
+        self.assertGreater(upper[0], result.coefficients[0])
 
     def test_hc3_matches_direct_sandwich_calculation(self):
         x = np.column_stack((np.ones(7), np.linspace(-1.0, 1.0, 7)))

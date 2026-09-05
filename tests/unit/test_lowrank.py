@@ -1,8 +1,9 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
-from dfckit import TimeSeriesRun
+from dfckit import TimeSeriesDataset, TimeSeriesRun
 from dfckit.connectivity import (
     LowRankCovariance,
     bidirectional_heldout_r2,
@@ -13,6 +14,7 @@ from dfckit.connectivity import (
     mean_projector_basis,
     subspace_distance,
     subspace_similarity,
+    summarize_lowrank_dataset,
 )
 
 
@@ -29,9 +31,7 @@ class LowRankKernelTests(unittest.TestCase):
         np.testing.assert_allclose(fitted.mean, values.mean(axis=0))
         np.testing.assert_allclose(fitted.scale, values.std(axis=0, ddof=0))
         np.testing.assert_allclose(fitted.variance_proportion, expected_proportion)
-        self.assertAlmostEqual(
-            subspace_similarity(fitted.basis, transposed[:3].T), 1.0
-        )
+        self.assertAlmostEqual(subspace_similarity(fitted.basis, transposed[:3].T), 1.0)
 
     def test_entropy_rank_and_concentration_have_known_values(self):
         proportion = np.asarray([0.5, 0.5, 0.0])
@@ -68,9 +68,7 @@ class LowRankKernelTests(unittest.TestCase):
         rotation_a, _ = np.linalg.qr(rng.normal(size=(3, 3)))
         rotation_b, _ = np.linalg.qr(rng.normal(size=(3, 3)))
 
-        aggregate = mean_projector_basis(
-            [basis @ rotation_a, basis @ rotation_b], rank=3
-        )
+        aggregate = mean_projector_basis([basis @ rotation_a, basis @ rotation_b], rank=3)
 
         self.assertAlmostEqual(subspace_similarity(basis, aggregate), 1.0)
 
@@ -107,6 +105,11 @@ class LowRankEstimatorTests(unittest.TestCase):
         self.assertEqual(result.heldout_r2.shape, (4, 2))
         self.assertEqual(result.split_similarity.shape, (4, 2))
         self.assertEqual(result.adjacent_similarity.shape, (2, 2))
+        self.assertEqual(result.all_pair_similarity.shape, (2, 2))
+        self.assertEqual(result.adjacency_excess.shape, (2, 2))
+        np.testing.assert_array_equal(result.all_pair_weights, [1, 1])
+        np.testing.assert_array_equal(result.all_pair_segment_ids, [0, 1])
+        np.testing.assert_allclose(result.adjacency_excess, 0.0, atol=1e-12)
         self.assertEqual(result.window_bases[0].shape, (4, 4, 1))
         self.assertEqual(result.window_bases[1].shape, (4, 4, 2))
         self.assertEqual(result.run_bases[0].shape, (4, 1))
@@ -132,6 +135,22 @@ class LowRankEstimatorTests(unittest.TestCase):
             1.0,
         )
 
+    def test_transform_reuses_three_pca_fits_per_window_across_ranks(self):
+        estimator = LowRankCovariance(length=8, step=8, ranks=(1, 2))
+        with patch("numpy.linalg.svd", wraps=np.linalg.svd) as svd:
+            result = estimator.transform(self.run)
+        self.assertEqual(svd.call_count, 3 * len(result.start_frames))
+        for window_index, window in enumerate(self.run.windows(8, 8)):
+            for rank_index, rank in enumerate(estimator.ranks):
+                expected = bidirectional_heldout_r2(window.values, rank, split=estimator.split)
+                self.assertEqual(result.heldout_r2[window_index, rank_index], expected)
+                left = fit_standardized_pca(window.values[: estimator.split], rank).basis
+                right = fit_standardized_pca(window.values[estimator.split :], rank).basis
+                self.assertEqual(
+                    result.split_similarity[window_index, rank_index],
+                    subspace_similarity(left, right),
+                )
+
     def test_result_arrays_are_read_only_and_rank_lookup_is_explicit(self):
         result = LowRankCovariance(length=8, step=8, ranks=(1, 2)).transform(self.run)
 
@@ -142,6 +161,40 @@ class LowRankEstimatorTests(unittest.TestCase):
             result.effective_rank[0] = 0.0
         with self.assertRaises(ValueError):
             result.window_bases[0][0, 0, 0] = 0.0
+        with self.assertRaises(ValueError):
+            result.all_pair_similarity[0, 0] = 0.0
+        with self.assertRaises(ValueError):
+            result.adjacency_excess[0, 0] = 0.0
+        with self.assertRaises(ValueError):
+            result.all_pair_weights[0] = 0
+
+    def test_all_pair_summary_uses_segment_window_count_weights(self):
+        rng = np.random.default_rng(123)
+        run = TimeSeriesRun(
+            values=rng.normal(size=(48, 4)),
+            original_indices=np.r_[np.arange(32), np.arange(40, 56)],
+            roi_names=self.run.roi_names,
+            subject="sub-002",
+            session="off",
+        )
+        estimator = LowRankCovariance(length=8, step=8, ranks=(1,))
+        result = estimator.transform(run)
+
+        np.testing.assert_array_equal(result.all_pair_segment_ids, [0, 1])
+        np.testing.assert_array_equal(result.all_pair_weights, [3, 1])
+        expected = float(
+            np.average(
+                result.all_pair_similarity[:, 0],
+                weights=result.all_pair_weights,
+            )
+        )
+        payload = summarize_lowrank_dataset(TimeSeriesDataset((run,)), estimator)
+        row = next(
+            item
+            for item in payload["rows"]
+            if item["endpoint"] == "all_pair_similarity.rank_1.mean"
+        )
+        self.assertAlmostEqual(row["value"], expected)
 
     def test_no_valid_window_and_rank_above_roi_count_are_rejected(self):
         short = TimeSeriesRun(
@@ -152,9 +205,55 @@ class LowRankEstimatorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no contiguous segment"):
             LowRankCovariance(length=4, step=2, ranks=(1,)).transform(short)
         with self.assertRaisesRegex(ValueError, "exceeds.*ROIs"):
-            LowRankCovariance(length=12, step=12, ranks=(1, 2, 3, 4, 5)).transform(
-                self.run
-            )
+            LowRankCovariance(length=12, step=12, ranks=(1, 2, 3, 4, 5)).transform(self.run)
+
+    def test_dataset_summary_writes_named_acquisition_endpoints(self):
+        second = TimeSeriesRun(
+            values=self.run.values + 0.1,
+            original_indices=self.run.original_indices,
+            roi_names=self.run.roi_names,
+            subject="sub-001",
+            session="on",
+            tr=self.run.tr,
+            acquisition_id="sub-001_ses-on_task-rest",
+        )
+        first = TimeSeriesRun(
+            values=self.run.values,
+            original_indices=self.run.original_indices,
+            roi_names=self.run.roi_names,
+            subject="sub-001",
+            session="off",
+            tr=self.run.tr,
+            acquisition_id="sub-001_ses-off_task-rest",
+        )
+        payload = summarize_lowrank_dataset(
+            TimeSeriesDataset((first, second)),
+            LowRankCovariance(length=8, step=8, ranks=(1, 2)),
+        )
+
+        self.assertEqual(payload["format"], "dfc-kit-lowrank-endpoints")
+        self.assertEqual(payload["n_acquisitions"], 2)
+        self.assertEqual(len(payload["rows"]), 26)
+        self.assertEqual(
+            {row["endpoint"] for row in payload["rows"]},
+            {
+                "effective_rank.mean",
+                "eigen_concentration.rank_1.mean",
+                "eigen_concentration.rank_2.mean",
+                "heldout_r2.rank_1.mean",
+                "heldout_r2.rank_2.mean",
+                "split_similarity.rank_1.mean",
+                "split_similarity.rank_2.mean",
+                "adjacent_similarity.rank_1.mean",
+                "adjacent_similarity.rank_2.mean",
+                "all_pair_similarity.rank_1.mean",
+                "all_pair_similarity.rank_2.mean",
+                "adjacency_excess.rank_1.mean",
+                "adjacency_excess.rank_2.mean",
+            },
+        )
+        self.assertTrue(all(row["value"] is not None for row in payload["rows"]))
+        self.assertEqual({row["session"] for row in payload["rows"]}, {"off", "on"})
 
 
 if __name__ == "__main__":

@@ -102,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--jobs",
         type=int,
         default=1,
-        help="validated execution parallelism (default: 1)",
+        help="worker processes across acquisitions, lengths, and draws (default: 1)",
     )
     information.add_argument(
         "--window-schedule",
@@ -117,6 +117,55 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="z-score each ROI within each fixed window (default: enabled)",
+    )
+
+    lowrank = subparsers.add_parser(
+        "lowrank-endpoints",
+        help="summarize low-rank covariance geometry inside censor-bounded windows",
+    )
+    _add_xcpd_arguments(lowrank)
+    _add_load_arguments(lowrank)
+    lowrank.add_argument("output", type=Path, help="new low-rank endpoint JSON file")
+    lowrank.add_argument("--window-length", type=int, required=True)
+    lowrank.add_argument("--window-step", type=int, required=True)
+    lowrank.add_argument(
+        "--rank",
+        type=int,
+        action="append",
+        required=True,
+        help="PCA rank; repeat in strictly increasing order",
+    )
+    lowrank.add_argument(
+        "--split",
+        type=int,
+        help="within-window split frame (default: half the window length)",
+    )
+
+    window_pattern = subparsers.add_parser(
+        "window-pattern-endpoints",
+        help="summarize whole-edge pattern similarity inside censor-bounded windows",
+    )
+    _add_xcpd_arguments(window_pattern)
+    _add_load_arguments(window_pattern)
+    window_pattern.add_argument(
+        "output", type=Path, help="new window-pattern endpoint JSON file"
+    )
+    window_pattern.add_argument("--window-length", type=int, required=True)
+    window_pattern.add_argument("--window-step", type=int, required=True)
+    window_pattern.add_argument(
+        "--taper", choices=("hamming", "uniform"), default="hamming"
+    )
+
+    static_fc = subparsers.add_parser(
+        "static-fc-endpoints",
+        help="compute whole-acquisition Fisher-z FC endpoints from retained XCP-D frames",
+    )
+    _add_xcpd_arguments(static_fc)
+    _add_load_arguments(static_fc)
+    static_fc.add_argument(
+        "output",
+        type=Path,
+        help="new static-FC endpoint JSON file",
     )
 
     fit = subparsers.add_parser(
@@ -148,6 +197,24 @@ def build_parser() -> argparse.ArgumentParser:
     fit.add_argument("--algorithm", choices=("lloyd", "minibatch"), default="minibatch")
     fit.add_argument("--batch-size", type=int, default=4096)
     fit.add_argument("--max-iter", type=int, default=10)
+    fit.add_argument(
+        "--streaming-tol",
+        type=float,
+        default=1e-4,
+        help="relative center-drift tolerance for streaming KMeans; 0 disables stopping",
+    )
+    fit.add_argument(
+        "--streaming-patience",
+        type=int,
+        default=3,
+        help="consecutive stable passes required for streaming KMeans",
+    )
+    fit.add_argument(
+        "--streaming-min-passes",
+        type=int,
+        default=2,
+        help="minimum complete passes before streaming KMeans may stop",
+    )
     fit.add_argument("--reassignment-ratio", type=float, default=0.01)
     fit.add_argument("--init-sample-size", type=int, default=None)
     fit.add_argument(
@@ -247,6 +314,12 @@ def build_parser() -> argparse.ArgumentParser:
     infer_states.add_argument("--bootstrap", type=int, default=10_000)
     infer_states.add_argument("--seed", type=int, required=True)
     infer_states.add_argument("--exact", action="store_true")
+    infer_states.add_argument(
+        "--within-condition-aggregation",
+        choices=("error", "mean"),
+        default="error",
+        help="how to combine repeated acquisitions within each participant and condition",
+    )
 
     infer_endpoints = subparsers.add_parser(
         "infer-paired-endpoints",
@@ -257,11 +330,108 @@ def build_parser() -> argparse.ArgumentParser:
     infer_endpoints.add_argument("--condition-a", required=True)
     infer_endpoints.add_argument("--condition-b", required=True)
     infer_endpoints.add_argument("--fdr-family", required=True)
+    infer_endpoints.add_argument(
+        "--endpoint",
+        action="append",
+        help=(
+            "endpoint name to include in this FDR family; repeat for multiple endpoints "
+            "(default: all endpoints)"
+        ),
+    )
     infer_endpoints.add_argument("--alpha", type=float, default=0.05)
     infer_endpoints.add_argument("--permutations", type=int, default=10_000)
     infer_endpoints.add_argument("--bootstrap", type=int, default=10_000)
     infer_endpoints.add_argument("--seed", type=int, required=True)
     infer_endpoints.add_argument("--exact", action="store_true")
+    infer_endpoints.add_argument(
+        "--within-condition-aggregation",
+        choices=("error", "mean"),
+        default="error",
+        help="how to combine repeated acquisitions within each participant and condition",
+    )
+
+    infer_groups = subparsers.add_parser(
+        "infer-independent-endpoints",
+        help="compare two independent endpoint cohorts with HC3 group models",
+    )
+    infer_groups.add_argument("endpoints_a", type=Path)
+    infer_groups.add_argument("endpoints_b", type=Path)
+    infer_groups.add_argument("output", type=Path)
+    infer_groups.add_argument("--group-a", required=True)
+    infer_groups.add_argument("--group-b", required=True)
+    infer_groups.add_argument("--fdr-family", required=True)
+    infer_groups.add_argument("--alpha", type=float, default=0.05)
+    infer_groups.add_argument(
+        "--within-group-aggregation",
+        choices=("error", "mean"),
+        default="mean",
+        help="how to combine repeated acquisitions within each participant and group",
+    )
+    infer_groups.add_argument(
+        "--covariates",
+        type=Path,
+        help="TSV containing group, subject, and requested numeric covariates",
+    )
+    infer_groups.add_argument(
+        "--covariate",
+        action="append",
+        default=[],
+        help="numeric covariate column; repeat for multiple columns",
+    )
+    infer_groups.add_argument("--group-column", default="group")
+    infer_groups.add_argument("--subject-column", default="subject")
+
+    infer_nbs = subparsers.add_parser(
+        "infer-paired-nbs",
+        help="run paired network-based statistics over an edge-summary JSON artifact",
+    )
+    infer_nbs.add_argument("endpoints", type=Path)
+    infer_nbs.add_argument("output", type=Path)
+    infer_nbs.add_argument("--condition-a", required=True)
+    infer_nbs.add_argument("--condition-b", required=True)
+    infer_nbs.add_argument("--statistic", default="mean")
+    infer_nbs.add_argument(
+        "--threshold",
+        action="append",
+        type=float,
+        required=True,
+        help="positive t-statistic threshold; repeat for a sensitivity set",
+    )
+    infer_nbs.add_argument("--permutations", type=int, default=10_000)
+    infer_nbs.add_argument("--seed", type=int, required=True)
+    infer_nbs.add_argument("--alpha", type=float, default=0.05)
+    infer_nbs.add_argument(
+        "--alternative",
+        choices=("two-sided", "greater", "less"),
+        default="two-sided",
+    )
+    infer_nbs.add_argument(
+        "--component-statistic",
+        choices=("edge_extent", "sum_abs_statistic"),
+        default="edge_extent",
+    )
+    infer_nbs.add_argument(
+        "--component-sign-mode",
+        choices=("separate", "pooled"),
+        default="separate",
+    )
+    infer_nbs.add_argument(
+        "--within-condition-aggregation",
+        choices=("error", "mean"),
+        default="error",
+        help="how to combine repeated acquisitions within each participant and condition",
+    )
+    infer_nbs.add_argument(
+        "--confounds",
+        type=Path,
+        help="optional TSV with subject followed by the requested nuisance columns",
+    )
+    infer_nbs.add_argument(
+        "--confound",
+        action="append",
+        default=[],
+        help="confound column in exact TSV order; repeat for multiple columns",
+    )
 
     score = subparsers.add_parser(
         "score-states",

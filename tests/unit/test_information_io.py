@@ -4,6 +4,7 @@ import unittest
 from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import numpy as np
 
@@ -204,14 +205,16 @@ class FixedInformationArtifactTests(unittest.TestCase):
             subject="sub-003",
             acquisition_id="sub-003_task-rest",
         )
-        with self.assertRaisesRegex(ValueError, "every acquisition"):
-            compute_fixed_information(
-                TimeSeriesDataset((self.dataset.runs[0], short)),
-                self.groups,
-                lengths=(20,),
-                draws=1,
-                sample_seed=91,
-            )
+        with patch("dfckit.information.fixed._estimate_information_blocks") as estimator:
+            with self.assertRaisesRegex(ValueError, "sub-003_task-rest"):
+                compute_fixed_information(
+                    TimeSeriesDataset((self.dataset.runs[0], short)),
+                    self.groups,
+                    lengths=(20,),
+                    draws=1,
+                    sample_seed=91,
+                )
+            estimator.assert_not_called()
 
     def test_frozen_schedule_can_omit_whole_cells(self):
         sampled = compute_fixed_information(

@@ -6,6 +6,7 @@ from dfckit.connectivity import mean_projector_basis, subspace_distance, subspac
 from dfckit.reference import (
     fit_feature_reference,
     fit_subspace_reference,
+    hierarchical_balanced_quantiles,
     leave_one_subject_out_feature_similarity,
     pearson_pattern_similarity,
     reference_subspace_similarity,
@@ -85,6 +86,19 @@ class FeatureReferenceTests(unittest.TestCase):
 
         self.assertGreater(median, 0.0)
         self.assertLess(median, 10.0)
+
+    def test_hierarchical_quantiles_balance_subject_session_and_observation(self):
+        values = np.asarray([0.0] * 100 + [4.0, 10.0])
+        subjects = ("sub-a",) * 101 + ("sub-b",)
+        acquisitions = ("run-a1",) * 100 + ("run-a2", "run-b1")
+
+        observed = hierarchical_balanced_quantiles(
+            values,
+            (subjects, acquisitions),
+            [0.25, 0.50, 0.75],
+        )
+
+        np.testing.assert_array_equal(observed, [0.0, 4.0, 10.0])
 
 
 class SubspaceReferenceTests(unittest.TestCase):

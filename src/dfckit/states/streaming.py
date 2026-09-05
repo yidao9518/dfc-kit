@@ -18,8 +18,10 @@ from numpy.typing import NDArray
 from .._arrays import readonly_copy as _readonly
 from .._validation import validated_positive_integer as _positive_int
 from ..storage import FeatureStore
+from ..storage._statistics import StreamingFeatureMoments
 from ..storage.store import StoredFeatureChunk
-from .data import FeatureKey, StateAssignments, StateLabelSequence
+from ..storage.store import StoredFeatureChunk as TransformedFeatureChunk
+from .data import FeatureKey, StateAssignments, StateLabelSequence, _require_matching_feature_space
 from .kmeans import KMeansFitResult, KMeansStateModel, fit_kmeans_states
 from .scoring import RunKMeansScore
 
@@ -76,35 +78,6 @@ class StreamingPCAModel:
             raise ValueError("Streaming PCA fit metadata is invalid")
 
 
-@dataclass(frozen=True)
-class TransformedFeatureChunk:
-    """One in-memory transformed chunk retaining its source sequence metadata."""
-
-    values: NDArray[np.float64]
-    sample_start_indices: NDArray[np.int64]
-    sample_end_indices: NDArray[np.int64]
-    subject: str
-    session: str | None
-    acquisition_id: str | None
-    segment_id: int
-    sequence_index: int
-    chunk_id: int
-    start_in_sequence: int
-    stop_in_sequence: int
-
-    def __post_init__(self) -> None:
-        values = np.asarray(self.values, dtype=float)
-        starts = np.asarray(self.sample_start_indices, dtype=np.int64)
-        ends = np.asarray(self.sample_end_indices, dtype=np.int64)
-        if values.ndim != 2 or not len(values):
-            raise ValueError("transformed feature values must be a non-empty matrix")
-        if starts.shape != (len(values),) or ends.shape != (len(values),):
-            raise ValueError("transformed feature sample indices do not align with rows")
-        if not np.isfinite(values).all() or np.any(ends < starts):
-            raise ValueError("transformed feature chunk contains invalid values or indices")
-        object.__setattr__(self, "values", _readonly(values))
-        object.__setattr__(self, "sample_start_indices", _readonly(starts))
-        object.__setattr__(self, "sample_end_indices", _readonly(ends))
 
 
 def _nonnegative_seed(value: int) -> int:
@@ -140,24 +113,12 @@ def _feature_statistics(
     sequence_indices: Iterable[int] | None = None,
 ) -> tuple[int, NDArray[np.float64], NDArray[np.float64]]:
     """Return count, mean, and population M2 using batch-combined Welford sums."""
-    count = 0
-    mean = np.zeros(store.n_features, dtype=np.float64)
-    m2 = np.zeros(store.n_features, dtype=np.float64)
+    moments = StreamingFeatureMoments.empty(store.n_features)
     for chunk in _iter_chunks(store, subjects, sequence_indices):
-        values = np.asarray(chunk.values, dtype=np.float64)
-        batch_count = values.shape[0]
-        batch_mean = values.mean(axis=0)
-        centered = values - batch_mean
-        batch_m2 = np.einsum("ij,ij->j", centered, centered)
-        combined = count + batch_count
-        delta = batch_mean - mean
-        weight = batch_count / combined
-        m2 += batch_m2 + np.square(delta) * (count * batch_count / combined)
-        mean += delta * weight
-        count = combined
-    if count == 0:
+        moments.update(chunk.values)
+    if moments.count == 0:
         raise ValueError("cannot fit a state model to an empty feature store selection")
-    return count, mean, m2
+    return moments.count, moments.mean, moments.m2
 
 
 def _normalization(
@@ -350,34 +311,6 @@ def _assignments_from_store(
     )
 
 
-def _validate_store_model(model: KMeansStateModel, store: FeatureStore) -> None:
-    if store.feature_keys != model.feature_keys:
-        raise ValueError("KMeans model and feature store use different feature identities or order")
-    if store.source_contract != model.source_contract:
-        raise ValueError("KMeans model and feature store use different source contracts")
-    stored = store.sample_interval_seconds
-    if (stored is None) != (model.sample_interval_seconds is None) or (
-        stored is not None
-        and model.sample_interval_seconds is not None
-        and not np.isclose(stored, model.sample_interval_seconds, rtol=0.0, atol=1e-9)
-    ):
-        raise ValueError("KMeans model and feature store use different sample intervals")
-
-
-def _validate_pca_store(model: StreamingPCAModel, store: FeatureStore) -> None:
-    if store.feature_keys != model.feature_keys:
-        raise ValueError("Streaming PCA and feature store use different feature identities or order")
-    if store.source_contract != model.source_contract:
-        raise ValueError("Streaming PCA and feature store use different source contracts")
-    stored = store.sample_interval_seconds
-    if (stored is None) != (model.sample_interval_seconds is None) or (
-        stored is not None
-        and model.sample_interval_seconds is not None
-        and not np.isclose(stored, model.sample_interval_seconds, rtol=0.0, atol=1e-9)
-    ):
-        raise ValueError("Streaming PCA and feature store use different sample intervals")
-
-
 def _selected_sequence_indices(
     store: FeatureStore,
     subjects: tuple[str, ...],
@@ -493,7 +426,7 @@ def iter_pca_store_chunks(
     sequence_indices: Iterable[int] | None = None,
 ) -> Iterator[TransformedFeatureChunk]:
     """Yield PCA-reduced chunks while retaining sequence and sample metadata."""
-    _validate_pca_store(model, store)
+    _require_matching_feature_space(model, store, label="Streaming PCA")
     if not isinstance(allow_fit_subjects, (bool, np.bool_)):
         raise TypeError("allow_fit_subjects must be boolean")
     selected_subjects = _subjects(store, subjects)
@@ -505,19 +438,7 @@ def iter_pca_store_chunks(
             np.asarray(chunk.values, dtype=np.float64) - model.feature_mean
         ) / model.feature_scale
         reduced = (standardized - model.pca_mean) @ model.pca_components.T
-        yield TransformedFeatureChunk(
-            values=reduced,
-            sample_start_indices=chunk.sample_start_indices,
-            sample_end_indices=chunk.sample_end_indices,
-            subject=chunk.subject,
-            session=chunk.session,
-            acquisition_id=chunk.acquisition_id,
-            segment_id=chunk.segment_id,
-            sequence_index=chunk.sequence_index,
-            chunk_id=chunk.chunk_id,
-            start_in_sequence=chunk.start_in_sequence,
-            stop_in_sequence=chunk.stop_in_sequence,
-        )
+        yield replace(chunk, values=reduced)
 
 
 def fit_minibatch_kmeans_store(
@@ -534,15 +455,21 @@ def fit_minibatch_kmeans_store(
     n_pca_components: int | None = None,
     pca_batch_size: int = 4096,
     subjects: Iterable[str] | None = None,
+    convergence_tol: float = 1e-4,
+    convergence_patience: int = 3,
+    minimum_passes: int = 2,
 ) -> KMeansFitResult:
     """Fit MiniBatchKMeans while keeping feature rows in a ``FeatureStore``.
 
-    ``max_iter`` is the number of complete passes through the selected store;
-    each pass calls ``partial_fit`` for every bounded batch.  K-means++ centres
-    are initialized from one deterministic uniform global-row sample, and the
-    best of ``n_init`` independent initializations is selected by a full-store
-    inertia pass.  The returned assignments contain labels and sample indices,
-    not feature rows.
+    ``max_iter`` is the maximum number of complete passes through the selected
+    store; each pass calls ``partial_fit`` for every bounded batch. Fitting
+    stops earlier when relative centre drift remains below ``convergence_tol``
+    for ``convergence_patience`` consecutive passes after at least
+    ``minimum_passes``. Set ``convergence_tol=0`` to require all passes.
+    K-means++ centres are initialized from one deterministic uniform global-row
+    sample, and the best of ``n_init`` independent initializations is selected
+    by a full-store inertia pass. The returned assignments contain labels and
+    sample indices, not feature rows.
     """
     if not isinstance(n_states, (int, np.integer)) or n_states < 2:
         raise ValueError("n_states must be at least two")
@@ -561,6 +488,15 @@ def fit_minibatch_kmeans_store(
     if n_pca_components is not None:
         n_pca_components = _positive_int(n_pca_components, "n_pca_components")
         pca_batch_size = _positive_int(pca_batch_size, "pca_batch_size")
+    if isinstance(convergence_tol, (bool, np.bool_)):
+        raise TypeError("convergence_tol must be a real number")
+    convergence_tol = float(convergence_tol)
+    if not np.isfinite(convergence_tol) or convergence_tol < 0.0:
+        raise ValueError("convergence_tol must be finite and non-negative")
+    convergence_patience = _positive_int(
+        convergence_patience, "convergence_patience"
+    )
+    minimum_passes = _positive_int(minimum_passes, "minimum_passes")
 
     try:
         import sklearn
@@ -609,6 +545,9 @@ def fit_minibatch_kmeans_store(
     best_centers: NDArray[np.float64] | None = None
     best_inertia = np.inf
     best_iterations = 0
+    best_passes_completed = 0
+    best_converged = False
+    initialization_passes: list[int] = []
     for initialization in range(n_init):
         initialization_seed = int(
             np.random.SeedSequence([seed, initialization]).generate_state(1)[0]
@@ -634,7 +573,11 @@ def fit_minibatch_kmeans_store(
         # bias without loading the complete feature matrix.
         estimator.partial_fit(initialization_sample)
         n_batches = 1
-        for _ in range(max_iter):
+        previous_centers = np.asarray(estimator.cluster_centers_, dtype=np.float64).copy()
+        stable_passes = 0
+        converged = False
+        passes_completed = 0
+        for pass_index in range(1, max_iter + 1):
             for batch in _iter_batches(
                 store,
                 fit_subjects,
@@ -650,6 +593,21 @@ def fit_minibatch_kmeans_store(
             ):
                 estimator.partial_fit(batch)
                 n_batches += 1
+            passes_completed = pass_index
+            current_centers = np.asarray(estimator.cluster_centers_, dtype=np.float64)
+            relative_drift = np.linalg.norm(current_centers - previous_centers) / max(
+                np.linalg.norm(previous_centers), np.finfo(np.float64).eps
+            )
+            stable_passes = stable_passes + 1 if relative_drift <= convergence_tol else 0
+            previous_centers = current_centers.copy()
+            if (
+                convergence_tol > 0.0
+                and passes_completed >= minimum_passes
+                and stable_passes >= convergence_patience
+            ):
+                converged = True
+                break
+        initialization_passes.append(passes_completed)
         centers = np.asarray(estimator.cluster_centers_, dtype=np.float64)
         inertia, _ = _labels_and_inertia(
             store,
@@ -667,6 +625,8 @@ def fit_minibatch_kmeans_store(
             best_centers = centers.copy()
             best_inertia = inertia
             best_iterations = n_batches
+            best_passes_completed = passes_completed
+            best_converged = converged
 
     assert best_centers is not None
     if pca_model is None:
@@ -710,7 +670,10 @@ def fit_minibatch_kmeans_store(
         fit_sample_count=n_samples,
         implementation=(
             f"scikit-learn {sklearn.__version__} MiniBatchKMeans; "
-            f"out-of-core partial_fit passes={max_iter}; kmeans++ sample={init_sample_size}; "
+            f"out-of-core partial_fit max_passes={max_iter}, "
+            f"selected_passes={best_passes_completed}, convergence_tol={convergence_tol:g}, "
+            f"patience={convergence_patience}, minimum_passes={minimum_passes}; "
+            f"kmeans++ sample={init_sample_size}; "
             f"{'original standardized feature space' if pca_model is None else f'IncrementalPCA n_components={n_pca_components}'}"
         ),
     )
@@ -720,7 +683,13 @@ def fit_minibatch_kmeans_store(
         counts += np.bincount(sequence.labels, minlength=n_states)
     if np.any(counts == 0):
         raise RuntimeError(f"KMeans returned an empty state; fitted counts={counts.tolist()}")
-    return KMeansFitResult(model=model, assignments=assignments)
+    return KMeansFitResult(
+        model=model,
+        assignments=assignments,
+        converged=None if convergence_tol == 0.0 else best_converged,
+        passes_completed=best_passes_completed,
+        initialization_passes=tuple(initialization_passes),
+    )
 
 
 def fit_kmeans_store_materialized(
@@ -773,7 +742,7 @@ def predict_kmeans_store(
     allow_fit_subjects: bool = False,
 ) -> StateAssignments:
     """Assign a store's rows without materializing its feature matrix."""
-    _validate_store_model(model, store)
+    _require_matching_feature_space(model, store, label="KMeans")
     if not isinstance(allow_fit_subjects, (bool, np.bool_)):
         raise TypeError("allow_fit_subjects must be boolean")
     prediction_subjects = _subjects(store, subjects)
@@ -797,7 +766,7 @@ def score_kmeans_store(
     subject, session, and acquisition while censor-bounded sequences remain
     separately counted.
     """
-    _validate_store_model(model, store)
+    _require_matching_feature_space(model, store, label="KMeans")
     if not isinstance(allow_fit_subjects, (bool, np.bool_)):
         raise TypeError("allow_fit_subjects must be boolean")
     selected_subjects = _subjects(store, subjects)
@@ -840,7 +809,6 @@ def score_kmeans_store(
             n_samples=sample_counts[identity],
             n_sequences=len(sequence_indices[identity]),
             total_squared_distance=total,
-            mean_squared_distance=total / sample_counts[identity],
         )
         for identity, total in totals.items()
         for subject, session, acquisition_id in (identity,)

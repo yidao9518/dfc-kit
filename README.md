@@ -28,14 +28,15 @@ for larger datasets, with matching Python and command-line interfaces.
   loading, acquisition identity, and censor-bounded sequences. Censored time
   points retain their original frame indices, and temporal operations are
   evaluated separately within contiguous retained segments.
-- **Connectivity:** weighted sliding-window FC, instantaneous ETS/MTD edges,
-  LEiDA, low-rank covariance geometry, and fixed-length MI/CMI.
+- **Connectivity:** whole-acquisition and weighted sliding-window FC,
+  whole-edge all-pair and order-specific pattern similarity, instantaneous
+  ETS/MTD edges, LEiDA, low-rank covariance geometry, and fixed-length MI/CMI.
 - **Connectivity and state analysis:** partition-based graph metrics, CAP, KMeans,
   Gaussian HMMs, state alignment, occupancy/dwell/transition summaries, and
   selection of the number of states using held-out participants.
 - **Inference:** paired sign-flips, bootstrap intervals, HC3 models,
-  declared-family FDR, generic paired endpoint inference, paired NBS, and
-  within-subject motion matching.
+  declared-family FDR, generic paired endpoint inference, independent-group
+  endpoint models, paired NBS, and within-subject motion matching.
 - **Large-dataset workflows:** chunked, memory-mapped FeatureStores and
   batch-wise fitting for MiniBatch KMeans and Incremental PCA.
 - **Portable results:** models and held-out predictions stored as JSON and
@@ -107,15 +108,25 @@ dfc-kit --help
 dfc-kit inspect-xcpd --help
 dfc-kit build-store --help
 dfc-kit fixed-information --help
+dfc-kit lowrank-endpoints --help
+dfc-kit window-pattern-endpoints --help
+dfc-kit static-fc-endpoints --help
 dfc-kit describe-states --help
 dfc-kit infer-state-metrics --help
 dfc-kit summarize-store --help
 dfc-kit summarize-information --help
 dfc-kit infer-paired-endpoints --help
+dfc-kit infer-independent-endpoints --help
+dfc-kit infer-paired-nbs --help
 ```
 
 See [Command-line workflows](docs/cli.md) for complete examples and arguments,
 including fixed-length MI/CMI artifacts and frozen-window replay.
+
+For two independent endpoint cohorts, `infer-independent-endpoints` fits the
+declared group contrast with HC3 standard errors, optional numeric covariates,
+and family-level Benjamini-Hochberg correction. See [Independent group
+inference](docs/group_inference.md).
 
 ## Documentation
 

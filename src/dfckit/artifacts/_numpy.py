@@ -5,13 +5,50 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
-from ._json import write_json_atomic
+from ._json import load_json_object, write_json_atomic
+
+
+def load_numpy_artifact(
+    path: str | Path,
+    *,
+    label: str,
+    manifest_fields: Collection[str],
+) -> tuple[dict[str, Any], dict[str, NDArray]]:
+    """Read the common ``manifest.json`` plus ``arrays.npz`` artifact shell."""
+    root = Path(path)
+    if not root.is_dir():
+        raise FileNotFoundError(f"{label} artifact directory does not exist: {root}")
+    manifest_path = root / "manifest.json"
+    arrays_path = root / "arrays.npz"
+    if not manifest_path.is_file() or not arrays_path.is_file():
+        raise FileNotFoundError(f"{label} artifact requires manifest.json and arrays.npz")
+    manifest = load_json_object(manifest_path, context=f"{label} artifact manifest")
+    if set(manifest) != set(manifest_fields):
+        raise ValueError(f"{label} artifact manifest fields do not match the schema")
+    names = manifest.get("array_names")
+    if (
+        not isinstance(names, list)
+        or any(not isinstance(name, str) or not name for name in names)
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError(f"{label} artifact array_names is invalid")
+    try:
+        with np.load(arrays_path, allow_pickle=False) as archive:
+            if set(archive.files) != set(names):
+                raise ValueError(f"{label} artifact arrays do not match the manifest")
+            arrays = {name: np.array(archive[name], copy=True) for name in names}
+    except (OSError, ValueError) as error:
+        raise ValueError(f"cannot read {label} artifact arrays: {error}") from error
+    if any(array.dtype.hasobject for array in arrays.values()):
+        raise ValueError(f"{label} artifact arrays cannot contain objects")
+    return manifest, arrays
 
 
 def write_numpy_artifact(
@@ -52,4 +89,4 @@ def write_numpy_artifact(
     return destination
 
 
-__all__ = ["write_numpy_artifact"]
+__all__ = ["load_numpy_artifact", "write_numpy_artifact"]

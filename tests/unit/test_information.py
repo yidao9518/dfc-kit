@@ -65,6 +65,54 @@ class FixedWindowSamplingTests(unittest.TestCase):
 
 @unittest.skipUnless(SCIPY_AVAILABLE, "scipy is not installed")
 class InformationKernelTests(unittest.TestCase):
+    def test_both_kernels_match_direct_neighbour_counts_with_separate_jitter_shapes(self):
+        from scipy.special import digamma
+
+        values = np.round(np.random.default_rng(807).normal(size=(19, 3)), 1)
+        for n_columns in (2, 3):
+            for jitter in (0.0, 1e-3):
+                for k in (1, 3):
+                    with self.subTest(n_columns=n_columns, jitter=jitter, k=k):
+                        data = values[:, :n_columns].copy()
+                        scale = np.maximum(data.std(axis=0, ddof=0, keepdims=True), 1.0)
+                        data += np.random.default_rng(17).normal(
+                            scale=jitter * scale, size=data.shape
+                        )
+                        distances = np.max(np.abs(data[:, None, :] - data[None, :, :]), axis=2)
+                        radius = np.nextafter(np.partition(distances, k, axis=1)[:, k], 0.0)
+
+                        def counts(indices, samples=data, radii=radius):
+                            marginal = samples[:, indices]
+                            distance = np.max(
+                                np.abs(marginal[:, None, :] - marginal[None, :, :]), axis=2
+                            )
+                            return np.count_nonzero(distance <= radii[:, None], axis=1) - 1
+
+                        if n_columns == 2:
+                            expected = (
+                                digamma(k)
+                                + digamma(len(data))
+                                - np.mean(digamma(counts([0]) + 1) + digamma(counts([1]) + 1))
+                            )
+                            observed = knn_mi(
+                                values[:, 0], values[:, 1], k=k, jitter=jitter, seed=17
+                            )
+                        else:
+                            expected = digamma(k) + np.mean(
+                                digamma(counts([2]) + 1)
+                                - digamma(counts([0, 2]) + 1)
+                                - digamma(counts([1, 2]) + 1)
+                            )
+                            observed = knn_cmi(
+                                values[:, 0],
+                                values[:, 1],
+                                values[:, 2],
+                                k=k,
+                                jitter=jitter,
+                                seed=17,
+                            )
+                        self.assertEqual(observed, expected)
+
     def test_dependent_gaussian_pair_exceeds_independent_pair(self):
         rng = np.random.default_rng(23)
         x = rng.normal(size=600)

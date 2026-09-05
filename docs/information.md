@@ -44,8 +44,9 @@ sampling seed.
   ties. Set `jitter=0` only when ties are known to be absent.
 - Each ROI column is independently centered and divided by its population SD by
   default. Constant columns are rejected.
-- `jobs` may parallelize independent draw-level estimates; executor order is
-  preserved, so it does not change the seeded windows or artifact row order.
+- `jobs` selects the number of worker processes for independent window
+  estimates. Sampling seeds, estimator seeds, and artifact row order are
+  preserved across worker counts.
 - When several conditioning ROI indices are supplied, their standardized time
   series are averaged into one scalar conditioning signal.
 - Finite-sample kNN estimates may be slightly negative and are not clipped.
@@ -106,7 +107,7 @@ dfc-kit fixed-information /path/to/xcp_d results/fixed-information \
   --roi-selection rois.json \
   --information-groups information-groups.json \
   --length 120 --length 180 \
-  --draws 20 --sample-seed 20260819 --jobs 1
+  --draws 20 --sample-seed 20260819 --jobs 4
 ```
 
 The output is a new directory containing `manifest.json` and `arrays.npz`. The manifest
@@ -118,6 +119,31 @@ acquisition; each retained cell still contains every draw from zero through
 every draw. `load_fixed_information` verifies that the arrays and manifest
 agree before returning a result; `summarize-information` produces compact
 tabular summaries when needed.
+
+## Parallel execution
+
+`compute_fixed_information(..., jobs=8)` and the CLI's `--jobs 8` share one
+pool of eight processes across all acquisition, length, and draw combinations.
+An acquisition with a single draw can run alongside other acquisitions and
+lengths. Each worker calculates all requested ROI pairs for its window using
+single-worker nearest-neighbour queries. Use the CPU allocation of the job or
+container to choose `jobs`; do not multiply it by another outer process pool.
+
+Windows are sampled in their serial order in the parent process. At most
+`2 * jobs` tasks are queued or running, and results are collected in that same
+order. The input dataset and final pairwise estimates remain in memory, while
+sampled windows are generated one acquisition-by-length cell at a time. The
+workers receive window arrays, not copies of the complete dataset.
+
+`FixedLengthInformation(..., jobs=8)` uses the same execution path for one run
+and length. There must be enough windows to occupy the requested workers;
+`jobs=1` avoids process startup costs for small analyses. Parallel execution
+uses the `spawn` start method. When calling either Python API from a script,
+put the call inside `if __name__ == "__main__":`; the CLI already handles this.
+Changing `jobs` changes scheduling only: the estimator, sampled frame bounds,
+pairwise MI/CMI values, and saved row order are the same as in serial execution.
+
+## Frozen window schedules
 
 For exact replay, provide a frozen schedule with this exact header:
 

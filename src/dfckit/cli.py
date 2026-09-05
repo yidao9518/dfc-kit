@@ -2,98 +2,43 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from collections.abc import Sequence
 
+from .commands import reporting, source, stability, states
 from .commands.parser import build_parser
-from .commands.reporting import (
-    compare_state_counts as _compare_state_counts,
-)
-from .commands.reporting import (
-    describe_states as _describe_states,
-)
-from .commands.reporting import (
-    infer_endpoints as _infer_endpoints,
-)
-from .commands.reporting import (
-    infer_state_metrics as _infer_state_metrics,
-)
-from .commands.reporting import (
-    summarize_information as _summarize_information,
-)
-from .commands.reporting import (
-    summarize_store as _summarize_store,
-)
-from .commands.source import (
-    build_store as _build_store,
-)
-from .commands.source import (
-    fixed_information as _fixed_information,
-)
-from .commands.source import (
-    inspect_xcpd as _inspect,
-)
-from .commands.stability import (
-    align_states as _align_states,
-)
-from .commands.stability import (
-    summarize_stability as _summarize_stability,
-)
-from .commands.states import (
-    fit_states as _fit_states,
-)
-from .commands.states import (
-    predict_states as _predict_states,
-)
-from .commands.states import (
-    score_states as _score_states,
-)
-from .commands.states import (
-    summarize_states as _summarize_states,
-)
 
-
-def _parser() -> argparse.ArgumentParser:
-    return build_parser()
+_HANDLERS = {
+    "inspect-xcpd": source.inspect_xcpd,
+    "build-store": source.build_store,
+    "fixed-information": source.fixed_information,
+    "lowrank-endpoints": source.lowrank_endpoints,
+    "window-pattern-endpoints": source.window_pattern_endpoints,
+    "static-fc-endpoints": source.static_fc_endpoints,
+    "fit-states": states.fit_states,
+    "predict-states": states.predict_states,
+    "summarize-states": states.summarize_states,
+    "summarize-store": reporting.summarize_store,
+    "summarize-information": reporting.summarize_information,
+    "describe-states": reporting.describe_states,
+    "infer-state-metrics": reporting.infer_state_metrics,
+    "infer-paired-endpoints": reporting.infer_endpoints,
+    "infer-independent-endpoints": reporting.infer_independent_endpoints,
+    "infer-paired-nbs": reporting.infer_nbs,
+    "score-states": states.score_states,
+    "compare-state-counts": reporting.compare_state_counts,
+    "align-states": stability.align_states,
+    "summarize-stability": stability.summarize_stability,
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a CLI command and return a process-style status code."""
-    parser = _parser()
+    parser = build_parser()
     namespace = parser.parse_args(argv)
     try:
-        if namespace.command == "inspect-xcpd":
-            result = _inspect(namespace)
-        elif namespace.command == "build-store":
-            result = _build_store(namespace)
-        elif namespace.command == "fixed-information":
-            result = _fixed_information(namespace)
-        elif namespace.command == "fit-states":
-            result = _fit_states(namespace)
-        elif namespace.command == "predict-states":
-            result = _predict_states(namespace)
-        elif namespace.command == "summarize-states":
-            result = _summarize_states(namespace)
-        elif namespace.command == "summarize-store":
-            result = _summarize_store(namespace)
-        elif namespace.command == "summarize-information":
-            result = _summarize_information(namespace)
-        elif namespace.command == "describe-states":
-            result = _describe_states(namespace)
-        elif namespace.command == "infer-state-metrics":
-            result = _infer_state_metrics(namespace)
-        elif namespace.command == "infer-paired-endpoints":
-            result = _infer_endpoints(namespace)
-        elif namespace.command == "score-states":
-            result = _score_states(namespace)
-        elif namespace.command == "compare-state-counts":
-            result = _compare_state_counts(namespace)
-        elif namespace.command == "align-states":
-            result = _align_states(namespace)
-        else:
-            result = _summarize_stability(namespace)
+        result = _HANDLERS[namespace.command](namespace)
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as error:
         print(f"dfc-kit: error: {error}", file=sys.stderr)
         return 2

@@ -445,13 +445,11 @@ def load_state_model_scores(path: str | Path) -> StateModelScoreReport:
             score = RunKMeansScore(
                 **common,
                 total_squared_distance=record["total_squared_distance"],
-                mean_squared_distance=record["mean_squared_distance"],
             )
         else:
             score = RunGaussianHMMScore(
                 **common,
                 log_likelihood=record["log_likelihood"],
-                log_likelihood_per_sample=record["log_likelihood_per_sample"],
             )
         scores.append(score)
     fit_subjects = raw["fit_subjects"]

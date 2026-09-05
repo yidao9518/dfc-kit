@@ -15,11 +15,13 @@ from numpy.typing import NDArray
 
 from .._arrays import readonly_copy as _readonly
 from ..storage import FeatureStore
-from .data import StateAssignments, StateLabelSequence
+from .data import _require_matching_feature_space
 from .hmm import (
     GaussianHMMFitResult,
     GaussianHMMStateModel,
     GaussianHMMStateResult,
+    _decode_reduced,
+    _fit_reduced_hmm,
     _optional_dependencies,
     _reconstruct_estimator,
 )
@@ -56,25 +58,11 @@ def _pca_view(model: GaussianHMMStateModel) -> StreamingPCAModel:
     )
 
 
-def _validate_hmm_store(model: GaussianHMMStateModel, store: FeatureStore) -> None:
-    if store.feature_keys != model.feature_keys:
-        raise ValueError("Gaussian HMM and feature store use different feature identities or order")
-    if store.source_contract != model.source_contract:
-        raise ValueError("Gaussian HMM and feature store use different source contracts")
-    stored = store.sample_interval_seconds
-    if (stored is None) != (model.sample_interval_seconds is None) or (
-        stored is not None
-        and model.sample_interval_seconds is not None
-        and not np.isclose(stored, model.sample_interval_seconds, rtol=0.0, atol=1e-9)
-    ):
-        raise ValueError("Gaussian HMM and feature store use different sample intervals")
-
-
 @dataclass(frozen=True)
 class _ReducedSequence:
     values: NDArray[np.float64]
-    starts: NDArray[np.int64]
-    ends: NDArray[np.int64]
+    sample_start_indices: NDArray[np.int64]
+    sample_end_indices: NDArray[np.int64]
     subject: str
     session: str | None
     acquisition_id: str | None
@@ -127,8 +115,8 @@ def _collect_reduced_sequences(
         output.append(
             _ReducedSequence(
                 values=values,
-                starts=starts,
-                ends=ends,
+                sample_start_indices=starts,
+                sample_end_indices=ends,
                 subject=identity[0],
                 session=identity[1],
                 acquisition_id=identity[2],
@@ -159,39 +147,7 @@ def _decode_store(
         sequence_indices=sequence_indices,
         allow_fit_subjects=allow_fit_subjects,
     )
-    observations = np.concatenate([sequence.values for sequence in sequences], axis=0)
-    lengths = [sequence.values.shape[0] for sequence in sequences]
-    estimator = _reconstruct_estimator(model)
-    labels = np.asarray(estimator.predict(observations, lengths), dtype=np.int64)
-    log_likelihood, posterior = estimator.score_samples(observations, lengths)
-    label_sequences: list[StateLabelSequence] = []
-    posterior_sequences: list[NDArray[np.float64]] = []
-    offset = 0
-    for sequence, length in zip(sequences, lengths, strict=True):
-        selected = slice(offset, offset + length)
-        label_sequences.append(
-            StateLabelSequence(
-                labels=labels[selected],
-                sample_start_indices=sequence.starts,
-                sample_end_indices=sequence.ends,
-                subject=sequence.subject,
-                session=sequence.session,
-                acquisition_id=sequence.acquisition_id,
-                segment_id=sequence.segment_id,
-            )
-        )
-        posterior_sequences.append(_readonly(posterior[selected]))
-        offset += length
-    return GaussianHMMStateResult(
-        assignments=StateAssignments(
-            sequences=tuple(label_sequences),
-            n_states=model.n_states,
-            source_contract=model.source_contract,
-            sample_interval_seconds=model.sample_interval_seconds,
-        ),
-        posterior_probabilities=tuple(posterior_sequences),
-        log_likelihood=float(log_likelihood),
-    )
+    return _decode_reduced(model, sequences, tuple(sequence.values for sequence in sequences))
 
 
 def fit_gaussian_hmm_store(
@@ -256,30 +212,12 @@ def fit_gaussian_hmm_store(
     if len(observations) < n_states:
         raise ValueError("n_states cannot exceed the number of fitted samples")
 
-    hmmlearn, sklearn, GaussianHMM, _ = _optional_dependencies()
-    initialization_seeds = tuple(seed + index for index in range(n_init))
-    estimators = []
-    likelihoods = np.empty(n_init, dtype=float)
-    for index, initialization_seed in enumerate(initialization_seeds):
-        estimator = GaussianHMM(
-            n_components=n_states,
-            covariance_type=covariance_type,
-            n_iter=n_iter,
-            tol=float(tol),
-            random_state=initialization_seed,
-            verbose=False,
-        ).fit(observations, lengths)
-        likelihoods[index] = estimator.score(observations, lengths)
-        estimators.append(estimator)
-    selected = int(np.argmax(likelihoods))
-    best = estimators[selected]
-    reduced_covariances = np.asarray(best.covars_, dtype=float)
-    if reduced_covariances.shape != (n_states, n_pca_components, n_pca_components):
-        raise RuntimeError(
-            "hmmlearn returned an unexpected covariance shape: "
-            f"{reduced_covariances.shape}"
-        )
-    standardized_means = best.means_ @ pca_model.pca_components + pca_model.pca_mean
+    hmmlearn, sklearn, _, _ = _optional_dependencies()
+    fitted = _fit_reduced_hmm(
+        observations, lengths, n_states=n_states, covariance_type=covariance_type,
+        n_iter=n_iter, tol=tol, seed=seed, n_init=n_init,
+    )
+    standardized_means = fitted["reduced_means"] @ pca_model.pca_components + pca_model.pca_mean
     emission_means = standardized_means * pca_model.feature_scale + pca_model.feature_mean
     selected_subjects_with_sequences = pca_model.fit_subjects
     selected_set = set(selected_subjects)
@@ -287,10 +225,7 @@ def fit_gaussian_hmm_store(
         identity[0] in selected_set for identity, _ in store.sequence_sample_counts
     )
     model = GaussianHMMStateModel(
-        start_probabilities=_readonly(best.startprob_),
-        transition_matrix=_readonly(best.transmat_),
-        reduced_means=_readonly(best.means_),
-        reduced_covariances=_readonly(reduced_covariances),
+        **fitted,
         emission_means=_readonly(emission_means),
         # The reduced covariance together with the frozen scaler and PCA
         # components is the compact original-space covariance representation.
@@ -305,21 +240,9 @@ def fit_gaussian_hmm_store(
         feature_keys=store.feature_keys,
         source_contract=store.source_contract,
         sample_interval_seconds=store.sample_interval_seconds,
-        n_states=n_states,
         n_pca_components=n_pca_components,
-        covariance_type=covariance_type,
-        seed=seed,
-        n_init=n_init,
-        n_iter=n_iter,
-        tol=float(tol),
         minimum_sequence_length=minimum_sequence_length,
         pca_batch_size=pca_batch_size,
-        selected_initialization=selected,
-        initialization_seeds=initialization_seeds,
-        initialization_log_likelihoods=_readonly(likelihoods),
-        iterations=int(best.monitor_.iter),
-        converged=bool(best.monitor_.converged),
-        log_likelihood=float(likelihoods[selected]),
         fit_subjects=selected_subjects_with_sequences,
         fit_sample_count=len(observations),
         fit_sequence_count=len(sequences),
@@ -348,7 +271,7 @@ def predict_gaussian_hmm_store(
     allow_fit_subjects: bool = False,
 ) -> GaussianHMMStateResult:
     """Decode store chunks with a frozen scaler, PCA, and Gaussian HMM."""
-    _validate_hmm_store(model, store)
+    _require_matching_feature_space(model, store, label="Gaussian HMM")
     if not isinstance(allow_fit_subjects, (bool, np.bool_)):
         raise TypeError("allow_fit_subjects must be boolean")
     selected_subjects = _subjects(store, subjects)
@@ -371,7 +294,7 @@ def score_gaussian_hmm_store(
     allow_fit_subjects: bool = False,
 ) -> tuple[RunGaussianHMMScore, ...]:
     """Score held-out acquisitions without transitions across censor gaps."""
-    _validate_hmm_store(model, store)
+    _require_matching_feature_space(model, store, label="Gaussian HMM")
     if not isinstance(allow_fit_subjects, (bool, np.bool_)):
         raise TypeError("allow_fit_subjects must be boolean")
     selected_subjects = _subjects(store, subjects)
@@ -422,7 +345,6 @@ def score_gaussian_hmm_store(
             n_samples=sample_counts[identity],
             n_sequences=sequence_counts[identity],
             log_likelihood=total,
-            log_likelihood_per_sample=total / sample_counts[identity],
         )
         for identity, total in totals.items()
         for subject, session, acquisition_id in (identity,)

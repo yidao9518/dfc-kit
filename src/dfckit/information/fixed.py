@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,7 +17,8 @@ from ..data import TimeSeriesDataset, TimeSeriesRun
 from .estimators import (
     FixedWindowSamples,
     _eligible_fixed_window_count,
-    _estimate_fixed_windows,
+    _estimate_information_blocks,
+    _information_dependencies,
     sample_fixed_windows,
 )
 
@@ -411,7 +412,13 @@ def compute_fixed_information(
     standardize: bool = True,
     jobs: int = 1,
 ) -> FixedInformationArtifact:
-    """Compute fixed-length block MI/CMI across a complete acquisition grid."""
+    """Compute fixed-length block MI/CMI across a complete acquisition grid.
+
+    ``jobs > 1`` shares one process pool across all acquisition/length/draw
+    combinations. Windows are submitted in a bounded stream and results retain
+    their serial order. Python scripts using parallel execution must call this
+    function inside an ``if __name__ == "__main__":`` guard.
+    """
     runs = _validated_dataset(dataset)
     if not isinstance(groups, InformationGroups):
         raise TypeError("groups must be an InformationGroups object")
@@ -467,6 +474,18 @@ def compute_fixed_information(
                 f"draws 0..{n_draws - 1}"
             )
 
+    if schedule is None:
+        ineligible_acquisitions = [
+            str(run.acquisition_id)
+            for run in runs
+            if not any(_eligible_fixed_window_count(run, length) for length in selected_lengths)
+        ]
+        if ineligible_acquisitions:
+            raise ValueError(
+                "every acquisition must contain at least one analyzable length cell; "
+                f"ineligible acquisitions: {ineligible_acquisitions}"
+            )
+
     acquisitions = tuple(
         InformationAcquisition(
             subject=str(run.subject),
@@ -492,85 +511,75 @@ def compute_fixed_information(
     mean_mutual_information: list[float] = []
     mean_conditional_information: list[float] = []
     cells: list[InformationCell] = []
-    implementation: str | None = None
+    def windows() -> Iterator[NDArray[np.float64]]:
+        for acquisition_index, run in enumerate(runs):
+            acquisition_id = str(run.acquisition_id)
+            for length in selected_lengths:
+                eligible = _eligible_fixed_window_count(run, length)
+                schedule_cell = (acquisition_id, length)
+                if eligible == 0:
+                    if schedule_cell in schedule_cells:
+                        raise ValueError(
+                            f"{run.acquisition_id}: frozen schedule contains an ineligible "
+                            f"length {length}"
+                        )
+                    continue
+                if schedule is not None and schedule_cell not in schedule_cells:
+                    continue
 
-    for acquisition_index, run in enumerate(runs):
-        acquisition_id = str(run.acquisition_id)
-        for length in selected_lengths:
-            eligible = _eligible_fixed_window_count(run, length)
-            schedule_cell = (acquisition_id, length)
-            if eligible == 0:
-                if schedule_cell in schedule_cells:
-                    raise ValueError(
-                        f"{run.acquisition_id}: frozen schedule contains an ineligible "
-                        f"length {length}"
+                cells.append(InformationCell(acquisition_index, length, eligible))
+                if schedule is None:
+                    samples = sample_fixed_windows(
+                        run,
+                        length,
+                        n_draws,
+                        seed=sampling_seed,
                     )
-                continue
-            if schedule is not None and schedule_cell not in schedule_cells:
-                continue
+                else:
+                    samples = _frozen_samples(
+                        run,
+                        tuple(
+                            scheduled[(acquisition_id, length, draw)]
+                            for draw in range(n_draws)
+                        ),
+                        eligible_starts=eligible,
+                        sample_seed=sampling_seed,
+                    )
+                for draw_index, window in enumerate(samples.values):
+                    scalar["acquisition_index"].append(acquisition_index)
+                    scalar["length"].append(length)
+                    scalar["draw"].append(int(samples.draw_indices[draw_index]))
+                    scalar["segment_id"].append(int(samples.segment_ids[draw_index]))
+                    scalar["start_within_segment"].append(
+                        int(samples.starts_within_segment[draw_index])
+                    )
+                    scalar["start_frame"].append(int(samples.start_frames[draw_index]))
+                    scalar["end_frame"].append(int(samples.end_frames[draw_index]))
+                    scalar["eligible_starts"].append(eligible)
+                    yield window
 
-            cells.append(InformationCell(acquisition_index, length, eligible))
-            if schedule is None:
-                samples = sample_fixed_windows(
-                    run,
-                    length,
-                    n_draws,
-                    seed=sampling_seed,
-                )
-            else:
-                samples = _frozen_samples(
-                    run,
-                    tuple(
-                        scheduled[(acquisition_id, length, draw)]
-                        for draw in range(n_draws)
-                    ),
-                    eligible_starts=eligible,
-                    sample_seed=sampling_seed,
-                )
-            result = _estimate_fixed_windows(
-                samples,
-                left,
-                right,
-                conditioning=condition,
-                standardize=standardize,
-                k=neighbors,
-                jitter=tie_jitter,
-                jitter_seed=tie_seed,
-                jobs=worker_count,
-            )
-            implementation = result.implementation
-            for draw_index in range(n_draws):
-                scalar["acquisition_index"].append(acquisition_index)
-                scalar["length"].append(length)
-                scalar["draw"].append(int(samples.draw_indices[draw_index]))
-                scalar["segment_id"].append(int(samples.segment_ids[draw_index]))
-                scalar["start_within_segment"].append(
-                    int(samples.starts_within_segment[draw_index])
-                )
-                scalar["start_frame"].append(int(samples.start_frames[draw_index]))
-                scalar["end_frame"].append(int(samples.end_frames[draw_index]))
-                scalar["eligible_starts"].append(eligible)
-                mutual_information.append(result.mutual_information[draw_index])
-                mean_mutual_information.append(
-                    float(result.mean_mutual_information[draw_index])
-                )
-                if result.conditional_mutual_information is not None:
-                    conditional_information.append(
-                        result.conditional_mutual_information[draw_index]
-                    )
-                    assert result.mean_conditional_mutual_information is not None
-                    mean_conditional_information.append(
-                        float(result.mean_conditional_mutual_information[draw_index])
-                    )
-
-    if schedule is None and any(
-        not any(cell.acquisition_index == index for cell in cells)
-        for index in range(len(runs))
+    for result in _estimate_information_blocks(
+        windows(),
+        left,
+        right,
+        conditioning=condition,
+        standardize=standardize,
+        k=neighbors,
+        jitter=tie_jitter,
+        jitter_seed=tie_seed,
+        jobs=worker_count,
     ):
-        raise ValueError("every acquisition must contain at least one analyzable length cell")
-    if implementation is None:
+        mutual_information.append(result.mutual_information)
+        mean_mutual_information.append(result.mean_mutual_information)
+        if result.conditional_mutual_information is not None:
+            conditional_information.append(result.conditional_mutual_information)
+            assert result.mean_conditional_mutual_information is not None
+            mean_conditional_information.append(result.mean_conditional_mutual_information)
+
+    if not cells:
         raise ValueError("fixed-information analysis produced no analyzable cells")
 
+    scipy, _, _ = _information_dependencies()
     integers = {
         name: _readonly(np.asarray(values, dtype=np.int64))
         for name, values in scalar.items()
@@ -593,7 +602,9 @@ def compute_fixed_information(
         jitter=tie_jitter,
         jitter_seed=tie_seed,
         standardized=bool(standardize),
-        implementation=implementation,
+        implementation=(
+            f"scipy {scipy.__version__} cKDTree; Kraskov MI and Frenzel-Pompe CMI"
+        ),
         acquisition_index=integers["acquisition_index"],
         length=integers["length"],
         draw=integers["draw"],

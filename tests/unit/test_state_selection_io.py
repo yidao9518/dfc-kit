@@ -15,7 +15,7 @@ def _report(fold: int, n_states: int, seed: int, score: float) -> StateModelScor
     evaluation_subjects = ("sub-001", "sub-002") if fold == 0 else ("sub-003", "sub-004")
     fit_subjects = ("sub-003", "sub-004") if fold == 0 else ("sub-001", "sub-002")
     scores = tuple(
-        RunKMeansScore(subject, "off", f"{subject}_run-1", 10, 1, score * 10, score)
+        RunKMeansScore(subject, "off", f"{subject}_run-1", 10, 1, score * 10)
         for subject in evaluation_subjects
     )
     return StateModelScoreReport(

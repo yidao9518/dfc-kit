@@ -4,11 +4,43 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
+from dfckit import TimeSeriesDataset, TimeSeriesRun
 from dfckit.states import FeatureSequence, FeatureSequenceDataset
-from dfckit.storage import FeatureStore, summarize_store_statistics
+from dfckit.storage import (
+    FeatureStore,
+    summarize_static_fc_dataset,
+    summarize_store_statistics,
+)
 
 
 class StoreSummaryTests(unittest.TestCase):
+    def test_static_fc_dataset_has_named_complete_edge_axis(self):
+        runs = tuple(
+            TimeSeriesRun(
+                values=np.column_stack(
+                    (
+                        np.arange(6, dtype=float),
+                        np.arange(6, dtype=float) + offset,
+                        -np.arange(6, dtype=float),
+                    )
+                ),
+                original_indices=np.arange(6),
+                roi_names=("visual", "motor", "putamen"),
+                subject=f"sub-{index:03d}",
+                session="off",
+                acquisition_id=f"run-{index}",
+            )
+            for index, offset in enumerate((0.0, 0.25), start=1)
+        )
+
+        payload = summarize_static_fc_dataset(TimeSeriesDataset(runs))
+
+        self.assertEqual(payload["n_features"], 3)
+        self.assertEqual(payload["n_acquisitions"], 2)
+        self.assertEqual(len(payload["rows"]), 6)
+        self.assertEqual(payload["rows"][0]["feature"], ["visual", "motor"])
+        self.assertEqual(payload["rows"][0]["n_samples"], 6)
+
     def test_segments_are_combined_within_acquisition_by_sample_count(self):
         keys = (("visual", "motor"), ("visual", "putamen"))
         sequences = (

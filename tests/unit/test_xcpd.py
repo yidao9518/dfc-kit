@@ -49,6 +49,9 @@ class XCPDInputTests(unittest.TestCase):
         )
         self.assertEqual(files.atlases[0].atlas, "Glasser")
         self.assertEqual(files.outliers, self.outliers)
+        self.assertEqual(files.subject, "sub-001")
+        self.assertEqual(files.session, "off")
+        self.assertEqual(files.acquisition_id, self.base)
 
     def test_full_length_tables_are_censored_and_multi_atlas_order_is_explicit(self):
         glasser = np.arange(10, dtype=float).reshape(5, 2)
@@ -131,6 +134,46 @@ class XCPDInputTests(unittest.TestCase):
             ],
         )
 
+    def test_discovery_enters_explicit_session_directory_symlinks(self):
+        self.write_atlas("Glasser", ["V1", "M1"], np.ones((4, 2)))
+        write_tsv(self.outliers, ["outlier"], [[0], [0], [0], [0]])
+        view = self.root / "view"
+        (view / "sub-001").mkdir(parents=True)
+        (view / "sub-001" / "ses-off").symlink_to(
+            self.root / "sub-001" / "ses-off",
+            target_is_directory=True,
+        )
+
+        files = discover_xcpd_runs(
+            view,
+            subject="001",
+            session="off",
+            task="rest",
+            atlases="Glasser",
+            space="MNI152NLin2009cAsym",
+        )
+        single = discover_xcpd_files(
+            view,
+            subject="001",
+            session="off",
+            task="rest",
+            atlases="Glasser",
+            space="MNI152NLin2009cAsym",
+        )
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0].atlases[0].timeseries, single.atlases[0].timeseries)
+
+    def test_single_without_session_keeps_subject_level_scope(self):
+        self.write_atlas("Glasser", ["V1", "M1"], np.ones((4, 2)))
+        write_tsv(self.outliers, ["outlier"], [[0], [0], [0], [0]])
+
+        with self.assertRaisesRegex(FileNotFoundError, "expected exactly one"):
+            discover_xcpd_files(self.root, subject="001", atlases="Glasser")
+        self.assertEqual(
+            len(discover_xcpd_runs(self.root, subject="001", atlases="Glasser")),
+            1,
+        )
+
     def test_time_axis_mismatch_is_rejected(self):
         self.write_atlas("Glasser", ["V1", "M1"], np.ones((3, 2)))
         write_tsv(self.outliers, ["outlier"], [[0], [1], [0], [0], [0]])
@@ -174,6 +217,10 @@ class XCPDInputTests(unittest.TestCase):
         write_tsv(self.outliers, ["outlier"], [[0], [0], [0], [0]])
         with self.assertRaisesRegex(FileNotFoundError, "specify space"):
             discover_xcpd_files(
+                self.root, subject="001", session="off", atlases="Glasser"
+            )
+        with self.assertRaisesRegex(ValueError, "duplicate XCP-D acquisition"):
+            discover_xcpd_runs(
                 self.root, subject="001", session="off", atlases="Glasser"
             )
 

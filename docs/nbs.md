@@ -5,6 +5,13 @@ edge differences. The strict edge-level threshold, component statistic,
 contrast direction, tested tail, and permutation count are explicit inputs and
 should be declared before examining the result.
 
+The CLI supports two explicit upstream definitions. `static-fc-endpoints`
+computes a complete Fisher-z edge vector from all retained frames in each
+XCP-D acquisition. Alternatively, `summarize-store` can reduce a dynamic edge
+FeatureStore to an acquisition-level statistic before `infer-paired-nbs`.
+Whole-acquisition static FC and a mean over sliding-window FC are not treated
+as interchangeable inputs; the output retains its source contract.
+
 ## Statistical unit and contrast
 
 The input has one complete edge vector per participant, normally formed by

@@ -55,7 +55,6 @@ class RunKMeansScore:
     n_samples: int
     n_sequences: int
     total_squared_distance: float
-    mean_squared_distance: float
 
     def __post_init__(self) -> None:
         _validate_run(
@@ -66,13 +65,13 @@ class RunKMeansScore:
             n_sequences=self.n_sequences,
         )
         total = _finite(self.total_squared_distance, "total_squared_distance")
-        mean = _finite(self.mean_squared_distance, "mean_squared_distance")
-        if total < 0.0 or mean < 0.0:
+        if total < 0.0:
             raise ValueError("KMeans squared distances must be non-negative")
-        if not np.isclose(mean, total / self.n_samples, rtol=1e-12, atol=1e-12):
-            raise ValueError("KMeans mean squared distance does not match its total")
         object.__setattr__(self, "total_squared_distance", total)
-        object.__setattr__(self, "mean_squared_distance", mean)
+
+    @property
+    def mean_squared_distance(self) -> float:
+        return self.total_squared_distance / self.n_samples
 
 
 @dataclass(frozen=True)
@@ -90,7 +89,6 @@ class RunGaussianHMMScore:
     n_samples: int
     n_sequences: int
     log_likelihood: float
-    log_likelihood_per_sample: float
 
     def __post_init__(self) -> None:
         _validate_run(
@@ -101,11 +99,11 @@ class RunGaussianHMMScore:
             n_sequences=self.n_sequences,
         )
         total = _finite(self.log_likelihood, "log_likelihood")
-        mean = _finite(self.log_likelihood_per_sample, "log_likelihood_per_sample")
-        if not np.isclose(mean, total / self.n_samples, rtol=1e-12, atol=1e-12):
-            raise ValueError("HMM per-sample log likelihood does not match its total")
         object.__setattr__(self, "log_likelihood", total)
-        object.__setattr__(self, "log_likelihood_per_sample", mean)
+
+    @property
+    def log_likelihood_per_sample(self) -> float:
+        return self.log_likelihood / self.n_samples
 
 
 RunStateModelScore: TypeAlias = RunKMeansScore | RunGaussianHMMScore

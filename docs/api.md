@@ -24,8 +24,13 @@ from dfckit.connectivity import (
     LEiDA,
     FixedPartitionGraph,
     LowRankCovariance,
+    adjacent_window_pattern_similarity,
+    all_pair_window_pattern_similarity,
+    edge_vector_to_symmetric_matrix,
     partition_edge_summary,
     SlidingWindowFC,
+    summarize_window_pattern_dataset,
+    window_pattern_adjacency_excess,
 )
 ```
 
@@ -46,6 +51,7 @@ from dfckit.information import (
 
 ```python
 from dfckit.storage import FeatureStore
+from dfckit.storage import summarize_static_fc_dataset
 
 store = FeatureStore.create(
     "results/window-fc.store",
@@ -107,12 +113,18 @@ directories or nested artifact loaders.
 ## Inference
 
 ```python
-from dfckit.inference import ols_hc3, paired_hc3, paired_nbs, paired_sign_flip
+from dfckit.inference import (
+    hc3_confidence_interval,
+    ols_hc3,
+    paired_hc3,
+    paired_nbs,
+    paired_sign_flip,
+)
 ```
 
 Inference modules provide paired sign flips, bootstrap intervals, HC3 models,
-declared-family FDR, and paired NBS. These are independent of state-count
-selection and model persistence.
+declared-family FDR, independent named-endpoint group models, and paired NBS.
+These are independent of state-count selection and model persistence.
 
 ## Advanced interfaces
 

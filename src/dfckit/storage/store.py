@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,10 +13,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from ..connectivity.instantaneous import ETS, MTD
-from ..connectivity.leida import LEiDA
-from ..connectivity.windows import SlidingWindowFC
-from ..data import TimeSeriesRun
+from .._arrays import readonly_copy
 
 FeatureKey = tuple[str, ...]
 
@@ -108,6 +105,21 @@ class StoredFeatureChunk:
     chunk_id: int
     start_in_sequence: int
     stop_in_sequence: int
+
+    def __post_init__(self) -> None:
+        values = np.asanyarray(self.values)
+        starts = np.asanyarray(self.sample_start_indices, dtype=np.int64)
+        ends = np.asanyarray(self.sample_end_indices, dtype=np.int64)
+        if values.ndim != 2 or not len(values):
+            raise ValueError("feature chunk values must be a non-empty matrix")
+        if starts.shape != (len(values),) or ends.shape != (len(values),):
+            raise ValueError("feature chunk sample indices do not align with rows")
+        if not np.isfinite(values).all() or np.any(ends < starts):
+            raise ValueError("feature chunk contains invalid values or indices")
+        for name, array in (
+            ("values", values), ("sample_start_indices", starts), ("sample_end_indices", ends)
+        ):
+            object.__setattr__(self, name, array if isinstance(array, np.memmap) else readonly_copy(array))
 
 
 class FeatureStore:
@@ -558,115 +570,3 @@ class FeatureStore:
         if not sequences:
             raise ValueError("no stored feature sequences match the requested subjects")
         return FeatureSequenceDataset(sequences)
-
-
-def append_window_fc(
-    store: FeatureStore,
-    run: TimeSeriesRun,
-    estimator: SlidingWindowFC,
-    *,
-    chunk_size: int = 128,
-) -> None:
-    """Compute and append sliding-window FC without materializing the full result."""
-    from .builders import append_window_fc as implementation
-
-    implementation(store, run, estimator, chunk_size=chunk_size)
-
-
-def write_window_fc_store(
-    root: str | Path,
-    runs: Sequence[TimeSeriesRun],
-    estimator: SlidingWindowFC,
-    *,
-    chunk_size: int = 128,
-    dtype: str | np.dtype = "float64",
-) -> FeatureStore:
-    """Create a store and stream sliding-window FC from compatible runs into it."""
-    from .builders import write_window_fc_store as implementation
-
-    return implementation(root, runs, estimator, chunk_size=chunk_size, dtype=dtype)
-
-
-def append_instantaneous_edges(
-    store: FeatureStore,
-    run: TimeSeriesRun,
-    estimator: ETS | MTD,
-    *,
-    chunk_size: int = 128,
-) -> None:
-    """Compute and append ETS or MTD through the common edge writer."""
-    from .builders import append_instantaneous_edges as implementation
-
-    implementation(store, run, estimator, chunk_size=chunk_size)
-
-
-def write_instantaneous_edge_store(
-    root: str | Path,
-    runs: Sequence[TimeSeriesRun],
-    estimator: ETS | MTD,
-    *,
-    chunk_size: int = 128,
-    dtype: str | np.dtype = "float64",
-) -> FeatureStore:
-    """Create a store and stream ETS or MTD through one writer."""
-    from .builders import write_instantaneous_edge_store as implementation
-
-    return implementation(root, runs, estimator, chunk_size=chunk_size, dtype=dtype)
-
-
-def append_cap(
-    store: FeatureStore,
-    run: TimeSeriesRun,
-    *,
-    chunk_size: int = 128,
-) -> None:
-    """Append segment-standardized instantaneous ROI patterns in bounded chunks."""
-    from .builders import append_cap as implementation
-
-    implementation(store, run, chunk_size=chunk_size)
-
-
-def write_cap_store(
-    root: str | Path,
-    runs: Sequence[TimeSeriesRun],
-    *,
-    chunk_size: int = 128,
-    dtype: str | np.dtype = "float64",
-) -> FeatureStore:
-    """Create a store of segment-standardized instantaneous ROI patterns."""
-    from .builders import write_cap_store as implementation
-
-    return implementation(root, runs, chunk_size=chunk_size, dtype=dtype)
-
-
-def append_leida(
-    store: FeatureStore,
-    run: TimeSeriesRun,
-    estimator: LEiDA,
-    *,
-    chunk_size: int = 128,
-) -> None:
-    """Append censor-bounded LEiDA leading eigenvectors in row chunks."""
-    from .builders import append_leida as implementation
-
-    implementation(store, run, estimator, chunk_size=chunk_size)
-
-
-def write_leida_store(
-    root: str | Path,
-    runs: Sequence[TimeSeriesRun],
-    estimator: LEiDA | None = None,
-    *,
-    chunk_size: int = 128,
-    dtype: str | np.dtype = "float64",
-) -> FeatureStore:
-    """Create a store of censor-bounded LEiDA leading eigenvectors."""
-    from .builders import write_leida_store as implementation
-
-    return implementation(
-        root,
-        runs,
-        estimator,
-        chunk_size=chunk_size,
-        dtype=dtype,
-    )

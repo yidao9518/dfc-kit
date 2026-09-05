@@ -1,6 +1,11 @@
 """Connectivity estimators and graph summaries of connectivity matrices."""
 
-from .correlation import edge_index, fisher_z_edges, weighted_correlation
+from .correlation import (
+    edge_index,
+    edge_vector_to_symmetric_matrix,
+    fisher_z_edges,
+    weighted_correlation,
+)
 from .instantaneous import (
     ETS,
     MTD,
@@ -22,6 +27,7 @@ from .lowrank import (
     mean_projector_basis,
     subspace_distance,
     subspace_similarity,
+    summarize_lowrank_dataset,
 )
 from .partition import (
     FixedPartitionGraph,
@@ -33,11 +39,20 @@ from .partition import (
     partition_edge_summary,
     positive_proportional_adjacency,
 )
-from .windows import SlidingWindowFC, WindowFCResult
+from .windows import (
+    AdjacentWindowSimilarityResult,
+    SlidingWindowFC,
+    WindowFCResult,
+    adjacent_window_pattern_similarity,
+    all_pair_window_pattern_similarity,
+    summarize_window_pattern_dataset,
+    window_pattern_adjacency_excess,
+)
 
 __all__ = [
     "ETS",
     "MTD",
+    "AdjacentWindowSimilarityResult",
     "FixedPartitionGraph",
     "FixedPartitionGraphResult",
     "InstantaneousEdgeResult",
@@ -50,8 +65,11 @@ __all__ = [
     "StandardizedPCA",
     "WindowFCResult",
     "achieved_density",
+    "adjacent_window_pattern_similarity",
+    "all_pair_window_pattern_similarity",
     "bidirectional_heldout_r2",
     "edge_index",
+    "edge_vector_to_symmetric_matrix",
     "effective_rank",
     "eigen_concentration",
     "fisher_z_edges",
@@ -64,5 +82,8 @@ __all__ = [
     "positive_proportional_adjacency",
     "subspace_distance",
     "subspace_similarity",
+    "summarize_lowrank_dataset",
+    "summarize_window_pattern_dataset",
     "weighted_correlation",
+    "window_pattern_adjacency_excess",
 ]

@@ -30,6 +30,29 @@ class XCPDRunFiles:
     outliers: Path
     motion: Path | None = None
 
+    @property
+    def acquisition_id(self) -> str:
+        """Return the common BIDS acquisition stem represented by these files."""
+        if not self.atlases:
+            raise ValueError("XCP-D run files contain no atlas time series")
+        stems = {_acquisition_stem(item.timeseries) for item in self.atlases}
+        if len(stems) != 1:
+            raise ValueError("XCP-D atlas files do not share one acquisition stem")
+        return stems.pop()
+
+    @property
+    def subject(self) -> str:
+        """Return the ``sub-*`` label encoded in the acquisition stem."""
+        value = _entity_map(self.acquisition_id).get("sub")
+        if value is None:
+            raise ValueError("XCP-D acquisition stem has no subject entity")
+        return f"sub-{value}"
+
+    @property
+    def session(self) -> str | None:
+        """Return the session value used by ``TimeSeriesRun``, without ``ses-``."""
+        return _entity_map(self.acquisition_id).get("ses")
+
 
 @dataclass(frozen=True)
 class XCPDLoadResult:
@@ -64,6 +87,97 @@ def _acquisition_stem(timeseries: Path) -> str:
     raise ValueError(f"not an XCP-D atlas time-series filename: {timeseries}")
 
 
+def _entity_map(stem: str) -> dict[str, str]:
+    entities: dict[str, str] = {}
+    for token in stem.split("_"):
+        if "-" in token:
+            key, value = token.split("-", 1)
+            if key and value:
+                entities[key] = value
+    return entities
+
+
+def _matching_atlas_timeseries(
+    root: Path,
+    *,
+    atlas: str,
+    subject: str | None,
+    session: str | None,
+    task: str | None,
+    space: str | None,
+    include_all_sessions: bool,
+) -> tuple[Path, ...]:
+    """Find first-atlas files while following explicit BIDS hierarchy links."""
+    subject_label = None if subject is None else _entity_label(subject, "sub")
+    session_label = None if session is None else _entity_label(session, "ses")
+    subject_pattern = "sub-*" if subject_label is None else subject_label
+    subject_dirs = list(root.glob(f"**/{subject_pattern}"))
+    if root.name == subject_pattern or (subject is None and root.name.startswith("sub-")):
+        subject_dirs.append(root)
+    func_dirs: set[Path] = set()
+    for subject_dir in {path for path in subject_dirs if path.is_dir()}:
+        candidates = [subject_dir / "func"]
+        if session_label is not None:
+            candidates = [subject_dir / session_label / "func"]
+        elif include_all_sessions:
+            candidates.extend(path / "func" for path in subject_dir.glob("ses-*"))
+        func_dirs.update(path for path in candidates if path.is_dir())
+    suffix = f"_atlas-{atlas}_stat-mean_timeseries.tsv"
+    filters = {
+        "sub": None if subject_label is None else subject_label.removeprefix("sub-"),
+        "ses": None if session_label is None else session_label.removeprefix("ses-"),
+        "task": None if task is None else str(task).removeprefix("task-"),
+    }
+    matches: set[Path] = set()
+    for func_dir in func_dirs:
+        for path in func_dir.glob(f"*{suffix}"):
+            entities = _entity_map(_acquisition_stem(path))
+            if any(
+                value is not None and entities.get(name) != value
+                for name, value in filters.items()
+            ):
+                continue
+            if space is not None and f"_space-{space}_" not in path.name:
+                continue
+            matches.add(path)
+    return tuple(sorted(matches, key=str))
+
+
+def _assemble_xcpd_run(
+    first_path: Path,
+    atlas_names: tuple[str, ...],
+) -> XCPDRunFiles:
+    """Attach all requested atlas and acquisition sidecars to one run."""
+    first_atlas = atlas_names[0]
+    stem = _acquisition_stem(first_path)
+    prefix = first_path.name.removesuffix(
+        f"_atlas-{first_atlas}_stat-mean_timeseries.tsv"
+    )
+    atlas_files: list[XCPDAtlasFiles] = []
+    for atlas in atlas_names:
+        timeseries = first_path.parent / f"{prefix}_atlas-{atlas}_stat-mean_timeseries.tsv"
+        if not timeseries.is_file():
+            raise FileNotFoundError(
+                f"missing XCP-D {atlas} time series for acquisition {stem!r}: {timeseries}"
+            )
+        coverage = timeseries.with_name(
+            timeseries.name.removesuffix("_stat-mean_timeseries.tsv")
+            + "_stat-coverage_bold.tsv"
+        )
+        if not coverage.is_file():
+            raise FileNotFoundError(f"missing XCP-D atlas coverage file: {coverage}")
+        atlas_files.append(XCPDAtlasFiles(atlas, timeseries, coverage))
+    outliers = first_path.parent / f"{stem}_outliers.tsv"
+    if not outliers.is_file():
+        raise FileNotFoundError(f"missing XCP-D outlier mask: {outliers}")
+    motion = first_path.parent / f"{stem}_motion.tsv"
+    return XCPDRunFiles(
+        tuple(atlas_files),
+        outliers,
+        motion if motion.is_file() else None,
+    )
+
+
 def discover_xcpd_files(
     root: str | Path,
     *,
@@ -75,69 +189,27 @@ def discover_xcpd_files(
 ) -> XCPDRunFiles:
     """Discover one unambiguous XCP-D run using its BIDS derivative structure."""
     root_path = Path(root)
-    subject_label = _entity_label(subject, "sub")
-    session_label = _entity_label(session, "ses") if session is not None else None
     atlas_names = _atlas_names(atlases)
-
-    relative_func = (
-        Path(subject_label) / session_label / "func"
-        if session_label is not None
-        else Path(subject_label) / "func"
+    candidates = _matching_atlas_timeseries(
+        root_path,
+        atlas=atlas_names[0],
+        subject=subject,
+        session=session,
+        task=task,
+        space=space,
+        include_all_sessions=False,
     )
-    func_dirs = sorted(path for path in root_path.glob(f"**/{relative_func}") if path.is_dir())
-    if not func_dirs:
-        raise FileNotFoundError(f"no XCP-D func directory found below {root_path / relative_func}")
-
-    entity_prefix = f"{subject_label}_"
-    if session_label is not None:
-        entity_prefix += f"{session_label}_"
-    entity_prefix += f"task-{task}"
-
-    atlas_files: list[XCPDAtlasFiles] = []
-    acquisition_stems: set[str] = set()
-    for atlas in atlas_names:
-        candidates = []
-        suffix = f"_atlas-{atlas}_stat-mean_timeseries.tsv"
-        for func_dir in func_dirs:
-            for path in func_dir.glob(f"{entity_prefix}*{suffix}"):
-                if space is None or f"_space-{space}_" in path.name:
-                    candidates.append(path)
-        candidates = sorted(set(candidates))
-        if len(candidates) != 1:
-            raise FileNotFoundError(
-                f"expected exactly one XCP-D {atlas} time series for {entity_prefix}, "
-                f"found {candidates}; specify space when multiple derivatives exist"
-            )
-        timeseries = candidates[0]
-        coverage = timeseries.with_name(
-            timeseries.name.removesuffix("_stat-mean_timeseries.tsv")
-            + "_stat-coverage_bold.tsv"
+    if len(candidates) != 1:
+        subject_label = _entity_label(subject, "sub")
+        session_label = None if session is None else _entity_label(session, "ses")
+        entity_prefix = "_".join(
+            filter(None, (subject_label, session_label, _entity_label(task, "task")))
         )
-        if not coverage.is_file():
-            raise FileNotFoundError(f"missing XCP-D atlas coverage file: {coverage}")
-        atlas_files.append(XCPDAtlasFiles(atlas, timeseries, coverage))
-        acquisition_stems.add(_acquisition_stem(timeseries))
-
-    if len(acquisition_stems) != 1:
-        raise ValueError(f"selected XCP-D atlases do not describe one acquisition: {atlas_files}")
-    stem = acquisition_stems.pop()
-    parent = atlas_files[0].timeseries.parent
-    outliers = parent / f"{stem}_outliers.tsv"
-    if not outliers.is_file():
-        raise FileNotFoundError(f"missing XCP-D outlier mask: {outliers}")
-    motion = parent / f"{stem}_motion.tsv"
-    return XCPDRunFiles(tuple(atlas_files), outliers, motion if motion.is_file() else None)
-
-
-def _entity_map(stem: str) -> dict[str, str]:
-    entities: dict[str, str] = {}
-    for token in stem.split("_"):
-        if "-" not in token:
-            continue
-        key, value = token.split("-", 1)
-        if key and value:
-            entities[key] = value
-    return entities
+        raise FileNotFoundError(
+            f"expected exactly one XCP-D {atlas_names[0]} time series for "
+            f"{entity_prefix}, found {list(candidates)}; specify space when multiple derivatives exist"
+        )
+    return _assemble_xcpd_run(candidates[0], atlas_names)
 
 
 def discover_xcpd_runs(
@@ -158,57 +230,27 @@ def discover_xcpd_runs(
     """
     root_path = Path(root)
     atlas_names = _atlas_names(atlases)
-    subject_value = None if subject is None else _entity_label(subject, "sub").removeprefix("sub-")
-    session_value = None if session is None else _entity_label(session, "ses").removeprefix("ses-")
-    first_atlas = atlas_names[0]
+    candidates = _matching_atlas_timeseries(
+        root_path,
+        atlas=atlas_names[0],
+        subject=subject,
+        session=session,
+        task=task,
+        space=space,
+        include_all_sessions=session is None,
+    )
     grouped: dict[tuple[Path, str], Path] = {}
-    for path in sorted(
-        root_path.glob(f"**/func/*_atlas-{first_atlas}_stat-mean_timeseries.tsv")
-    ):
-        stem = _acquisition_stem(path)
-        entities = _entity_map(stem)
-        if subject_value is not None and entities.get("sub") != subject_value:
-            continue
-        if session_value is not None and entities.get("ses") != session_value:
-            continue
-        if task is not None and entities.get("task") != str(task).removeprefix("task-"):
-            continue
-        if space is not None and f"_space-{space}_" not in path.name:
-            continue
-        key = (path.parent, stem)
+    for path in candidates:
+        key = (path.parent, _acquisition_stem(path))
         if key in grouped:
             raise ValueError(f"duplicate XCP-D acquisition files for {key}")
         grouped[key] = path
-
-    discovered: list[XCPDRunFiles] = []
-    for (func_dir, stem), first_path in sorted(grouped.items(), key=lambda item: str(item[0])):
-        atlas_prefix = first_path.name.removesuffix(
-            f"_atlas-{first_atlas}_stat-mean_timeseries.tsv"
-        )
-        atlas_files: list[XCPDAtlasFiles] = []
-        for atlas in atlas_names:
-            path = func_dir / (
-                f"{atlas_prefix}_atlas-{atlas}_stat-mean_timeseries.tsv"
-            )
-            if not path.is_file():
-                raise FileNotFoundError(
-                    f"missing XCP-D {atlas} time series for acquisition {stem!r}: {path}"
-                )
-            coverage = path.with_name(
-                path.name.removesuffix("_stat-mean_timeseries.tsv")
-                + "_stat-coverage_bold.tsv"
-            )
-            if not coverage.is_file():
-                raise FileNotFoundError(f"missing XCP-D atlas coverage file: {coverage}")
-            atlas_files.append(XCPDAtlasFiles(atlas, path, coverage))
-        outliers = func_dir / f"{stem}_outliers.tsv"
-        if not outliers.is_file():
-            raise FileNotFoundError(f"missing XCP-D outlier mask: {outliers}")
-        motion = func_dir / f"{stem}_motion.tsv"
-        discovered.append(XCPDRunFiles(tuple(atlas_files), outliers, motion if motion.is_file() else None))
-    if not discovered:
+    if not grouped:
         raise FileNotFoundError(f"no matching XCP-D acquisitions found below {root_path}")
-    return tuple(discovered)
+    return tuple(
+        _assemble_xcpd_run(path, atlas_names)
+        for _, path in sorted(grouped.items(), key=lambda item: str(item[0]))
+    )
 
 
 def _read_tsv(path: Path) -> tuple[tuple[str, ...], list[list[str]]]:
@@ -367,20 +409,11 @@ def load_xcpd_files(
         all_names.extend(selected)
         all_coverage.extend(selected_coverage)
 
-    acquisition_stem = _acquisition_stem(files.atlases[0].timeseries)
-    if subject is None or session is None:
-        entities = acquisition_stem.split("_")
-        if subject is None:
-            subject = next((value for value in entities if value.startswith("sub-")), None)
-        if session is None:
-            session = next(
-                (
-                    value.removeprefix("ses-")
-                    for value in entities
-                    if value.startswith("ses-")
-                ),
-                None,
-            )
+    acquisition_stem = files.acquisition_id
+    if subject is None:
+        subject = files.subject
+    if session is None:
+        session = files.session
     if acquisition_id is None:
         acquisition_id = acquisition_stem
     try:

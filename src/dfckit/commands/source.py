@@ -7,7 +7,16 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from ..connectivity import ETS, MTD, LEiDA, SlidingWindowFC
+from ..artifacts._json import write_json_atomic
+from ..connectivity import (
+    ETS,
+    MTD,
+    LEiDA,
+    LowRankCovariance,
+    SlidingWindowFC,
+    summarize_lowrank_dataset,
+    summarize_window_pattern_dataset,
+)
 from ..data import TimeSeriesDataset
 from ..information import (
     compute_fixed_information,
@@ -17,6 +26,7 @@ from ..information import (
 )
 from ..io import discover_xcpd_runs, load_xcpd_dataset
 from ..storage import (
+    summarize_static_fc_dataset,
     write_cap_store,
     write_instantaneous_edge_store,
     write_leida_store,
@@ -242,4 +252,66 @@ def fixed_information(namespace: argparse.Namespace) -> dict[str, object]:
         "right_rois": list(artifact.groups.right),
         "schedule_mode": artifact.schedule_mode,
         "subjects": list(dataset.subjects),
+    }
+
+
+def lowrank_endpoints(namespace: argparse.Namespace) -> dict[str, object]:
+    """Compute acquisition-level low-rank covariance endpoints."""
+    dataset = _load_selected_dataset(namespace)
+    estimator = LowRankCovariance(
+        length=namespace.window_length,
+        step=namespace.window_step,
+        ranks=tuple(namespace.rank),
+        split=namespace.split,
+    )
+    payload = summarize_lowrank_dataset(dataset, estimator)
+    output = write_json_atomic(namespace.output, payload)
+    return {
+        "method": "lowrank-covariance",
+        "output": str(output),
+        "n_runs": dataset.n_runs,
+        "subjects": list(dataset.subjects),
+        "n_endpoints": len(payload["rows"]),
+        "length": estimator.length,
+        "step": estimator.step,
+        "split": estimator.split,
+        "ranks": list(estimator.ranks),
+    }
+
+
+def window_pattern_endpoints(namespace: argparse.Namespace) -> dict[str, object]:
+    """Compute acquisition-level whole-edge pattern-similarity endpoints."""
+    dataset = _load_selected_dataset(namespace)
+    estimator = SlidingWindowFC(
+        length=namespace.window_length,
+        step=namespace.window_step,
+        taper=namespace.taper,
+    )
+    payload = summarize_window_pattern_dataset(dataset, estimator)
+    output = write_json_atomic(namespace.output, payload)
+    return {
+        "method": "window-pattern",
+        "output": str(output),
+        "n_runs": dataset.n_runs,
+        "subjects": list(dataset.subjects),
+        "n_endpoints": len(payload["rows"]),
+        "length": estimator.length,
+        "step": estimator.step,
+        "taper": estimator.taper,
+    }
+
+
+def static_fc_endpoints(namespace: argparse.Namespace) -> dict[str, object]:
+    """Compute one whole-acquisition Fisher-z FC vector per XCP-D run."""
+    dataset = _load_selected_dataset(namespace)
+    payload = summarize_static_fc_dataset(dataset)
+    output = write_json_atomic(namespace.output, payload)
+    return {
+        "method": "static-fc",
+        "output": str(output),
+        "n_runs": dataset.n_runs,
+        "subjects": list(dataset.subjects),
+        "n_features": payload["n_features"],
+        "n_endpoints": len(payload["rows"]),
+        "source_contract": payload["source_contract"],
     }

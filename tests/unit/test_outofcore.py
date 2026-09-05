@@ -135,7 +135,62 @@ class StreamingKMeansTests(StreamingStoreMixin, unittest.TestCase):
                 np.concatenate([item.labels for item in first.assignments.sequences]),
                 np.concatenate([item.labels for item in second.assignments.sequences]),
             )
+            self.assertEqual(first.converged, second.converged)
+            self.assertEqual(first.passes_completed, second.passes_completed)
+            self.assertEqual(first.initialization_passes, second.initialization_passes)
             self.assertIn("out-of-core partial_fit", first.model.implementation)
+
+    def test_pass_level_convergence_stops_before_maximum(self):
+        with TemporaryDirectory() as temporary:
+            store = self._store(Path(temporary) / "features", chunk_size=4)
+            fit = fit_minibatch_kmeans_store(
+                store,
+                subjects=("sub-000", "sub-001", "sub-002"),
+                n_states=2,
+                seed=12,
+                n_init=3,
+                max_iter=100,
+                batch_size=7,
+            )
+
+            self.assertTrue(fit.converged)
+            self.assertLess(fit.passes_completed, 100)
+            self.assertEqual(len(fit.initialization_passes), 3)
+            self.assertTrue(all(passes < 100 for passes in fit.initialization_passes))
+
+    def test_zero_tolerance_runs_every_requested_pass(self):
+        with TemporaryDirectory() as temporary:
+            store = self._store(Path(temporary) / "features", chunk_size=4)
+            fit = fit_minibatch_kmeans_store(
+                store,
+                n_states=2,
+                seed=12,
+                n_init=2,
+                max_iter=5,
+                batch_size=7,
+                convergence_tol=0,
+            )
+
+            self.assertIsNone(fit.converged)
+            self.assertEqual(fit.passes_completed, 5)
+            self.assertEqual(fit.initialization_passes, (5, 5))
+
+    def test_convergence_parameters_are_validated(self):
+        with TemporaryDirectory() as temporary:
+            store = self._store(Path(temporary) / "features", chunk_size=4)
+            common = {"n_states": 2, "seed": 12, "n_init": 1, "max_iter": 2}
+            for tolerance in (-1.0, np.nan, np.inf):
+                with self.subTest(convergence_tol=tolerance), self.assertRaisesRegex(
+                    ValueError, "convergence_tol"
+                ):
+                    fit_minibatch_kmeans_store(
+                        store, convergence_tol=tolerance, **common
+                    )
+            for name in ("convergence_patience", "minimum_passes"):
+                with self.subTest(parameter=name), self.assertRaisesRegex(
+                    ValueError, name
+                ):
+                    fit_minibatch_kmeans_store(store, **common, **{name: 0})
 
     def test_chunk_boundaries_do_not_change_batches_or_result(self):
         with TemporaryDirectory() as temporary:

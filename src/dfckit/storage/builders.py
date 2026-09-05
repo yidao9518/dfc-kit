@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -115,6 +115,33 @@ def write_window_fc_store(
     return store
 
 
+def _append_segment_rows(
+    store: FeatureStore,
+    source: TimeSeriesRun | _InstantaneousRows,
+    values: NDArray,
+    starts: NDArray,
+    ends: NDArray,
+    segments: NDArray,
+    *,
+    chunk_size: int,
+    transform: Callable[[NDArray], NDArray] | None = None,
+) -> None:
+    """Append a method's row representation without mixing retained segments."""
+    for segment_id in dict.fromkeys(segments.tolist()):
+        positions = np.flatnonzero(segments == segment_id)
+
+        def parts(segment_positions=positions):
+            for first in range(0, len(segment_positions), chunk_size):
+                selected = segment_positions[first : first + chunk_size]
+                rows = values[selected]
+                yield rows if transform is None else transform(rows), starts[selected], ends[selected]
+
+        store.append_sequence_parts(
+            parts(), subject=source.subject, session=source.session,
+            segment_id=int(segment_id), acquisition_id=source.acquisition_id,
+        )
+
+
 def _append_instantaneous_edge_samples(
     store: FeatureStore,
     source: _InstantaneousRows,
@@ -130,27 +157,10 @@ def _append_instantaneous_edge_samples(
         source_contract=source.contract,
         sample_interval_seconds=source.tr,
     )
-    for segment_id in dict.fromkeys(source.segments.tolist()):
-        positions = np.flatnonzero(source.segments == segment_id)
-
-        def parts(
-            segment_positions: NDArray[np.int64] = positions,
-        ) -> Iterator[tuple[NDArray, NDArray, NDArray]]:
-            for first in range(0, len(segment_positions), size):
-                selected = segment_positions[first : first + size]
-                yield (
-                    edge_products(source.values[selected]),
-                    source.starts[selected],
-                    source.ends[selected],
-                )
-
-        store.append_sequence_parts(
-            parts(),
-            subject=source.subject,
-            session=source.session,
-            segment_id=int(segment_id),
-            acquisition_id=source.acquisition_id,
-        )
+    _append_segment_rows(
+        store, source, source.values, source.starts, source.ends, source.segments,
+        chunk_size=size, transform=edge_products,
+    )
 
 
 def append_instantaneous_edges(
@@ -215,24 +225,9 @@ def append_cap(
         sample_interval_seconds=run.tr,
     )
     standardized, original, segment_ids = _segment_standardized_samples(run, method_name="CAP")
-    for segment_id in dict.fromkeys(segment_ids.tolist()):
-        positions = np.flatnonzero(segment_ids == segment_id)
-
-        def parts(
-            segment_positions: NDArray[np.int64] = positions,
-        ) -> Iterator[tuple[NDArray, NDArray, NDArray]]:
-            for first in range(0, len(segment_positions), size):
-                selected = segment_positions[first : first + size]
-                indices = original[selected]
-                yield standardized[selected], indices, indices
-
-        store.append_sequence_parts(
-            parts(),
-            subject=run.subject,
-            session=run.session,
-            segment_id=int(segment_id),
-            acquisition_id=run.acquisition_id,
-        )
+    _append_segment_rows(
+        store, run, standardized, original, original, segment_ids, chunk_size=size,
+    )
 
 
 def write_cap_store(
@@ -284,24 +279,10 @@ def append_leida(
         sample_interval_seconds=run.tr,
     )
     result = estimator.transform(run)
-    for segment_id in dict.fromkeys(result.segment_ids.tolist()):
-        positions = np.flatnonzero(result.segment_ids == segment_id)
-
-        def parts(
-            segment_positions: NDArray[np.int64] = positions,
-        ) -> Iterator[tuple[NDArray, NDArray, NDArray]]:
-            for first in range(0, len(segment_positions), size):
-                selected = segment_positions[first : first + size]
-                indices = result.original_indices[selected]
-                yield result.leading_vectors[selected], indices, indices
-
-        store.append_sequence_parts(
-            parts(),
-            subject=run.subject,
-            session=run.session,
-            segment_id=int(segment_id),
-            acquisition_id=run.acquisition_id,
-        )
+    _append_segment_rows(
+        store, run, result.leading_vectors, result.original_indices, result.original_indices,
+        result.segment_ids, chunk_size=size,
+    )
 
 
 def write_leida_store(

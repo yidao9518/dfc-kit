@@ -12,8 +12,8 @@ from numpy.typing import NDArray
 from ..states.hmm import GaussianHMMStateModel
 from ..states.kmeans import KMeansStateModel
 from ..states.streaming import StreamingPCAModel
-from ._json import load_json_object
-from ._numpy import write_numpy_artifact
+from ._fields import artifact_finite_float, artifact_integer
+from ._numpy import load_numpy_artifact, write_numpy_artifact
 
 FORMAT_NAME = "dfckit-fitted-model"
 FORMAT_VERSION = 4
@@ -122,33 +122,24 @@ def _metadata_fields(metadata: object, expected: set[str]) -> dict[str, object]:
         raise TypeError("model artifact metadata must be a JSON object")
     observed = set(metadata)
     if observed != expected:
-        missing = sorted(expected - observed)
-        unexpected = sorted(observed - expected)
         raise ValueError(
             "model artifact metadata fields do not match the schema; "
-            f"missing={missing}, unexpected={unexpected}"
+            f"missing={sorted(expected - observed)}, "
+            f"unexpected={sorted(observed - expected)}"
         )
     return metadata
 
 
 def _integer(metadata: Mapping[str, object], name: str, *, minimum: int = 0) -> int:
-    value = metadata[name]
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"model metadata {name!r} must be an integer")
-    if value < minimum:
-        raise ValueError(f"model metadata {name!r} must be at least {minimum}")
-    return value
+    return artifact_integer(metadata[name], f"model metadata {name!r}", minimum=minimum)
 
 
 def _finite_float(metadata: Mapping[str, object], name: str, *, positive: bool = False) -> float:
-    value = metadata[name]
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(f"model metadata {name!r} must be numeric")
-    output = float(value)
-    if not np.isfinite(output) or (positive and output <= 0.0):
-        qualifier = "finite and positive" if positive else "finite"
-        raise ValueError(f"model metadata {name!r} must be {qualifier}")
-    return output
+    return artifact_finite_float(
+        metadata[name],
+        f"model metadata {name!r}",
+        positive=positive,
+    )
 
 
 def _optional_float(metadata: Mapping[str, object], name: str) -> float | None:
@@ -320,16 +311,13 @@ def save_fitted_model(model: FittedModel, path: str | Path) -> Path:
 
 
 def _load_manifest(root: Path) -> tuple[str, dict[str, object], dict[str, NDArray[np.float64]]]:
-    if not root.is_dir():
-        raise FileNotFoundError(f"model artifact directory does not exist: {root}")
-    manifest_path = root / "manifest.json"
-    arrays_path = root / "arrays.npz"
-    if not manifest_path.is_file() or not arrays_path.is_file():
-        raise FileNotFoundError("model artifact requires manifest.json and arrays.npz")
-    manifest = load_json_object(manifest_path, context="model artifact manifest")
     expected_fields = {"array_names", "format", "format_version", "metadata", "model_kind"}
-    if set(manifest) != expected_fields:
-        raise ValueError("model artifact manifest fields do not match the schema")
+    manifest, arrays = load_numpy_artifact(
+        root,
+        label="model",
+        manifest_fields=expected_fields,
+    )
+    arrays = {name: _readonly_float(value, name) for name, value in arrays.items()}
     if manifest["format"] != FORMAT_NAME:
         raise ValueError("not a dfc-kit fitted-model artifact")
     version = manifest["format_version"]
@@ -342,26 +330,10 @@ def _load_manifest(root: Path) -> tuple[str, dict[str, object], dict[str, NDArra
     kind = manifest["model_kind"]
     if kind not in {"kmeans-state", "gaussian-hmm-state", "streaming-pca"}:
         raise ValueError(f"unsupported fitted model kind: {kind!r}")
-    names = manifest["array_names"]
-    if (
-        not isinstance(names, list)
-        or any(not isinstance(name, str) or not name for name in names)
-        or len(set(names)) != len(names)
-    ):
-        raise ValueError("model artifact array_names is invalid")
-    try:
-        with np.load(arrays_path, allow_pickle=False) as archive:
-            if set(archive.files) != set(names):
-                raise ValueError("model artifact array archive does not match its manifest")
-            arrays = {name: _readonly_float(archive[name], name) for name in names}
-    except (OSError, ValueError) as error:
-        if isinstance(error, ValueError) and str(error).startswith("model artifact"):
-            raise
-        raise ValueError(f"cannot read model artifact arrays: {error}") from error
     metadata = manifest["metadata"]
     if not isinstance(metadata, dict):
         raise TypeError("model artifact metadata must be a JSON object")
-    return kind, metadata, arrays
+    return str(kind), metadata, arrays
 
 
 def _require_arrays(

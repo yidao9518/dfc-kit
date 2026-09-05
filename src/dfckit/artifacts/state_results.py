@@ -11,8 +11,9 @@ from numpy.typing import ArrayLike, NDArray
 from .._arrays import readonly_copy as _readonly
 from ..states.data import StateAssignments, StateLabelSequence
 from ..states.metrics import summarize_state_assignments
-from ._json import load_json_object, write_json_atomic
-from ._numpy import write_numpy_artifact
+from ._fields import artifact_integer
+from ._json import write_json_atomic
+from ._numpy import load_numpy_artifact, write_numpy_artifact
 
 FORMAT_NAME = "dfckit-state-predictions"
 FORMAT_VERSION = 4
@@ -147,13 +148,6 @@ def save_state_predictions(predictions: StatePredictions, path: str | Path) -> P
 
 
 def _manifest(root: Path) -> tuple[dict[str, object], dict[str, NDArray]]:
-    if not root.is_dir():
-        raise FileNotFoundError(f"state-prediction artifact directory does not exist: {root}")
-    manifest_path = root / "manifest.json"
-    arrays_path = root / "arrays.npz"
-    if not manifest_path.is_file() or not arrays_path.is_file():
-        raise FileNotFoundError("state-prediction artifact requires manifest.json and arrays.npz")
-    manifest = load_json_object(manifest_path, context="state-prediction manifest")
     expected = {
         "array_names",
         "format",
@@ -166,40 +160,23 @@ def _manifest(root: Path) -> tuple[dict[str, object], dict[str, NDArray]]:
         "sequences",
         "source_contract",
     }
-    if not isinstance(manifest, dict) or set(manifest) != expected:
-        raise ValueError("state-prediction manifest fields do not match the schema")
+    manifest, arrays = load_numpy_artifact(
+        root,
+        label="state-prediction",
+        manifest_fields=expected,
+    )
     if manifest["format"] != FORMAT_NAME or manifest["format_version"] != FORMAT_VERSION:
         raise ValueError("unsupported state-prediction artifact format or version")
-    names = manifest["array_names"]
-    if (
-        not isinstance(names, list)
-        or any(not isinstance(name, str) or not name for name in names)
-        or len(set(names)) != len(names)
-    ):
-        raise ValueError("state-prediction array_names is invalid")
-    try:
-        with np.load(arrays_path, allow_pickle=False) as archive:
-            if set(archive.files) != set(names):
-                raise ValueError("state-prediction arrays do not match the manifest")
-            arrays = {name: np.array(archive[name], copy=True) for name in archive.files}
-    except (OSError, ValueError) as error:
-        raise ValueError(f"cannot read state-prediction arrays: {error}") from error
-    if any(array.dtype.hasobject for array in arrays.values()):
-        raise ValueError("state-prediction arrays cannot contain objects")
     return manifest, arrays
-
-
-def _positive_integer(value: object, name: str, minimum: int = 1) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        raise ValueError(f"state-prediction {name} must be an integer >= {minimum}")
-    return value
 
 
 def load_state_predictions(path: str | Path) -> StatePredictions:
     """Load and validate predictions written by :func:`save_state_predictions`."""
     manifest, arrays = _manifest(Path(path))
     model_kind = manifest["model_kind"]
-    model_seed = _positive_integer(manifest["model_seed"], "model_seed", minimum=0)
+    model_seed = artifact_integer(
+        manifest["model_seed"], "state-prediction model_seed", minimum=0
+    )
     expected_arrays = {
         "labels",
         "sample_start_indices",
@@ -212,7 +189,9 @@ def load_state_predictions(path: str | Path) -> StatePredictions:
         raise ValueError("state-prediction model_kind is invalid")
     if set(arrays) != expected_arrays:
         raise ValueError("state-prediction array set is invalid for its model kind")
-    n_states = _positive_integer(manifest["n_states"], "n_states", minimum=2)
+    n_states = artifact_integer(
+        manifest["n_states"], "state-prediction n_states", minimum=2
+    )
     source_contract = manifest["source_contract"]
     if not isinstance(source_contract, str) or not source_contract.strip():
         raise ValueError("state-prediction source_contract must be non-empty")
@@ -261,7 +240,9 @@ def load_state_predictions(path: str | Path) -> StatePredictions:
             raise ValueError("state-prediction sequence metadata is invalid")
         start = int(offsets[index])
         stop = int(offsets[index + 1])
-        if _positive_integer(record["n_samples"], "sequence n_samples") != stop - start:
+        if artifact_integer(
+            record["n_samples"], "state-prediction sequence n_samples", minimum=1
+        ) != stop - start:
             raise ValueError("state-prediction sequence length does not match offsets")
         sequences.append(
             StateLabelSequence(

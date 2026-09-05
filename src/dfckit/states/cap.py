@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import numpy as np
-
 from .._preprocessing import _segment_standardized_samples
 from ..data import TimeSeriesDataset
-from .data import FeatureSequence, FeatureSequenceDataset
+from .data import FeatureSequence, FeatureSequenceDataset, _segment_feature_sequences
 from .kmeans import KMeansFitResult, fit_kmeans_states
 
 
@@ -20,23 +18,13 @@ def cap_sequences(dataset: TimeSeriesDataset) -> FeatureSequenceDataset:
         standardized, original_indices, segment_ids = _segment_standardized_samples(
             run, method_name="CAP"
         )
-        for segment_id in dict.fromkeys(segment_ids.tolist()):
-            positions = np.flatnonzero(segment_ids == segment_id)
-            original = original_indices[positions]
-            sequences.append(
-                FeatureSequence(
-                    values=standardized[positions],
-                    sample_start_indices=original,
-                    sample_end_indices=original,
-                    feature_keys=feature_keys,
-                    subject=run.subject,
-                    session=run.session,
-                    acquisition_id=run.acquisition_id,
-                    segment_id=segment_id,
-                    source_contract="cap:within-segment-roi-zscore-ddof0",
-                    sample_interval_seconds=run.tr,
-                )
+        sequences.extend(
+            _segment_feature_sequences(
+                run, standardized, original_indices, original_indices, segment_ids,
+                feature_keys=feature_keys, source_contract="cap:within-segment-roi-zscore-ddof0",
+                interval=run.tr,
             )
+        )
     if not sequences:
         raise ValueError("CAP requires at least one retained segment with two frames")
     return FeatureSequenceDataset(sequences)

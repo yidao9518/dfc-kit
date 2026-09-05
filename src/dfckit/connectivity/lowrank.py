@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from .._arrays import readonly_copy as _readonly
-from ..data import TimeSeriesRun
+from ..data import TimeSeriesDataset, TimeSeriesRun
 
 
 def _validated_values(values: ArrayLike, *, label: str) -> NDArray[np.float64]:
@@ -78,6 +79,10 @@ class LowRankCovarianceResult:
     heldout_r2: NDArray[np.float64]
     split_similarity: NDArray[np.float64]
     adjacent_similarity: NDArray[np.float64]
+    all_pair_similarity: NDArray[np.float64]
+    adjacency_excess: NDArray[np.float64]
+    all_pair_weights: NDArray[np.int64]
+    all_pair_segment_ids: NDArray[np.int64]
     window_bases: tuple[NDArray[np.float64], ...]
     run_bases: tuple[NDArray[np.float64], ...]
     adjacent_left_windows: NDArray[np.int64]
@@ -172,8 +177,12 @@ def heldout_reconstruction_r2(train: ArrayLike, test: ArrayLike, rank: int) -> f
     if training.shape[1] != testing.shape[1]:
         raise ValueError("train and test must use the same number of ROIs")
     fit = fit_standardized_pca(training, rank)
-    standardized = fit.standardize(testing)
-    reconstructed = standardized @ fit.basis @ fit.basis.T
+    return _reconstruction_r2(fit.standardize(testing), fit.basis)
+
+
+def _reconstruction_r2(standardized: NDArray[np.float64], basis: NDArray[np.float64]) -> float:
+    """Reconstruct using an already fitted basis and training-standardized holdout."""
+    reconstructed = standardized @ basis @ basis.T
     denominator = float(np.sum(standardized**2))
     if not np.isfinite(denominator) or denominator <= 1e-12:
         raise ValueError("held-out standardized values have no finite energy")
@@ -226,8 +235,7 @@ def mean_projector_basis(
 ) -> NDArray[np.float64]:
     """Average projection matrices and return their leading eigenvectors."""
     validated = tuple(
-        _validated_basis(basis, label=f"basis {index}")
-        for index, basis in enumerate(bases)
+        _validated_basis(basis, label=f"basis {index}") for index, basis in enumerate(bases)
     )
     if not validated:
         raise ValueError("at least one basis is required")
@@ -235,9 +243,7 @@ def mean_projector_basis(
     if any(basis.shape != shape for basis in validated[1:]):
         raise ValueError("all bases must have the same ROI and rank dimensions")
     output_rank = shape[1] if rank is None else rank
-    if isinstance(output_rank, (bool, np.bool_)) or not isinstance(
-        output_rank, (int, np.integer)
-    ):
+    if isinstance(output_rank, (bool, np.bool_)) or not isinstance(output_rank, (int, np.integer)):
         raise TypeError("rank must be an integer")
     if output_rank < 1 or output_rank > shape[0]:
         raise ValueError(f"rank must be between 1 and {shape[0]}")
@@ -287,9 +293,7 @@ class LowRankCovariance:
             raise ValueError("ranks must be in strictly increasing order")
         maximum = min(boundary - 1, length - boundary - 1)
         if normalized_ranks[0] < 1 or normalized_ranks[-1] > maximum:
-            raise ValueError(
-                f"ranks must be between 1 and {maximum} for the requested split"
-            )
+            raise ValueError(f"ranks must be between 1 and {maximum} for the requested split")
 
         self.length = int(length)
         self.step = int(step)
@@ -301,9 +305,7 @@ class LowRankCovariance:
         if not windows:
             raise ValueError("no contiguous segment is long enough for the requested window")
         if self.ranks[-1] > run.n_rois:
-            raise ValueError(
-                f"maximum rank {self.ranks[-1]} exceeds the run's {run.n_rois} ROIs"
-            )
+            raise ValueError(f"maximum rank {self.ranks[-1]} exceeds the run's {run.n_rois} ROIs")
 
         n_windows = len(windows)
         n_ranks = len(self.ranks)
@@ -318,15 +320,23 @@ class LowRankCovariance:
             rank_values[window_index] = effective_rank(full_fit.variance_proportion)
             left = window.values[: self.split]
             right = window.values[self.split :]
+            left_fit = fit_standardized_pca(left, self.ranks[-1])
+            right_fit = fit_standardized_pca(right, self.ranks[-1])
+            standardized_right = left_fit.standardize(right)
+            standardized_left = right_fit.standardize(left)
             for rank_index, rank in enumerate(self.ranks):
                 concentrations[window_index, rank_index] = eigen_concentration(
                     full_fit.variance_proportion, rank
                 )
-                heldout[window_index, rank_index] = bidirectional_heldout_r2(
-                    window.values, rank, split=self.split
+                # Match the contiguous layout of a standalone rank-specific fit.
+                left_basis = np.ascontiguousarray(left_fit.basis[:, :rank])
+                right_basis = np.ascontiguousarray(right_fit.basis[:, :rank])
+                heldout[window_index, rank_index] = np.mean(
+                    [
+                        _reconstruction_r2(standardized_right, left_basis),
+                        _reconstruction_r2(standardized_left, right_basis),
+                    ]
                 )
-                left_basis = fit_standardized_pca(left, rank).basis
-                right_basis = fit_standardized_pca(right, rank).basis
                 split_stability[window_index, rank_index] = subspace_similarity(
                     left_basis, right_basis
                 )
@@ -344,6 +354,42 @@ class LowRankCovariance:
                     bases[rank_index][left], bases[rank_index][right]
                 )
 
+        all_pair_segments = []
+        all_pair_values = []
+        adjacency_excess_values = []
+        all_pair_weights = []
+        segment_ids = np.asarray([window.segment_id for window in windows], dtype=np.int64)
+        for segment_id in np.unique(segment_ids):
+            indices = np.flatnonzero(segment_ids == segment_id)
+            if len(indices) < 2:
+                continue
+            segment_all_pair = np.empty(n_ranks, dtype=float)
+            for rank_index in range(n_ranks):
+                pair_values = [
+                    subspace_similarity(
+                        bases[rank_index][int(left)],
+                        bases[rank_index][int(right)],
+                    )
+                    for pair_position, left in enumerate(indices[:-1])
+                    for right in indices[pair_position + 1 :]
+                ]
+                segment_all_pair[rank_index] = float(np.mean(pair_values))
+            selected_adjacent = [segment_ids[left] == segment_id for left, _ in adjacent_pairs]
+            segment_adjacent = np.asarray(
+                [adjacent[selected_adjacent, rank_index].mean() for rank_index in range(n_ranks)]
+            )
+            all_pair_segments.append(int(segment_id))
+            all_pair_values.append(segment_all_pair)
+            adjacency_excess_values.append(segment_adjacent - segment_all_pair)
+            all_pair_weights.append(len(indices) - 1)
+
+        if all_pair_values:
+            all_pair = np.stack(all_pair_values)
+            adjacency_excess = np.stack(adjacency_excess_values)
+        else:
+            all_pair = np.empty((0, n_ranks), dtype=float)
+            adjacency_excess = np.empty((0, n_ranks), dtype=float)
+
         stacked_bases = tuple(_readonly(np.stack(per_rank)) for per_rank in bases)
         run_bases = tuple(
             mean_projector_basis(per_rank, rank=rank)
@@ -355,6 +401,10 @@ class LowRankCovariance:
             heldout_r2=_readonly(heldout),
             split_similarity=_readonly(split_stability),
             adjacent_similarity=_readonly(adjacent),
+            all_pair_similarity=_readonly(all_pair),
+            adjacency_excess=_readonly(adjacency_excess),
+            all_pair_weights=_readonly(np.asarray(all_pair_weights, dtype=np.int64)),
+            all_pair_segment_ids=_readonly(np.asarray(all_pair_segments, dtype=np.int64)),
             window_bases=stacked_bases,
             run_bases=run_bases,
             adjacent_left_windows=_readonly(
@@ -382,3 +432,82 @@ class LowRankCovariance:
             step=self.step,
             split=self.split,
         )
+
+
+def summarize_lowrank_dataset(
+    dataset: TimeSeriesDataset,
+    estimator: LowRankCovariance,
+) -> dict[str, Any]:
+    """Return acquisition-level means for low-rank covariance endpoints."""
+    if not isinstance(dataset, TimeSeriesDataset):
+        raise TypeError("dataset must be a TimeSeriesDataset")
+    if not isinstance(estimator, LowRankCovariance):
+        raise TypeError("estimator must be a LowRankCovariance")
+    rows: list[dict[str, Any]] = []
+    for run in dataset.runs:
+        result = estimator.transform(run)
+        base = {
+            "subject": run.subject,
+            "session": run.session,
+            "acquisition_id": run.acquisition_id,
+            "length": estimator.length,
+            "step": estimator.step,
+            "split": estimator.split,
+            "n_windows": len(result.start_frames),
+            "n_adjacent_pairs": len(result.adjacent_left_windows),
+            "n_all_pair_segments": len(result.all_pair_weights),
+            "statistic": "mean",
+        }
+        rows.append(
+            {
+                **base,
+                "endpoint": "effective_rank.mean",
+                "feature": ["covariance_spectrum"],
+                "measure": "effective_rank",
+                "value": float(np.mean(result.effective_rank)),
+            }
+        )
+        for rank_index, rank in enumerate(result.ranks):
+            measures = {
+                "eigen_concentration": result.eigen_concentration[:, rank_index],
+                "heldout_r2": result.heldout_r2[:, rank_index],
+                "split_similarity": result.split_similarity[:, rank_index],
+                "adjacent_similarity": result.adjacent_similarity[:, rank_index],
+                "all_pair_similarity": result.all_pair_similarity[:, rank_index],
+                "adjacency_excess": result.adjacency_excess[:, rank_index],
+            }
+            for measure, values in measures.items():
+                weights = (
+                    result.all_pair_weights
+                    if measure in {"all_pair_similarity", "adjacency_excess"}
+                    else None
+                )
+                rows.append(
+                    {
+                        **base,
+                        "endpoint": f"{measure}.rank_{rank}.mean",
+                        "feature": [measure, f"rank_{rank}"],
+                        "measure": measure,
+                        "rank": rank,
+                        "value": (
+                            None if not len(values) else float(np.average(values, weights=weights))
+                        ),
+                    }
+                )
+    return {
+        "format": "dfc-kit-lowrank-endpoints",
+        "format_version": 2,
+        "source_contract": (
+            f"lowrank:length={estimator.length};step={estimator.step};"
+            f"split={estimator.split};ranks={','.join(map(str, estimator.ranks))};"
+            "population-SD-standardized;windows-within-retained-segments"
+        ),
+        "summary": "within-acquisition means of low-rank covariance geometry",
+        "length": estimator.length,
+        "step": estimator.step,
+        "split": estimator.split,
+        "ranks": list(estimator.ranks),
+        "roi_names": list(dataset.roi_names),
+        "n_acquisitions": dataset.n_runs,
+        "rows": rows,
+    }

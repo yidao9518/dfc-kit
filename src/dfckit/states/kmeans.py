@@ -13,6 +13,7 @@ from .data import (
     FeatureSequenceDataset,
     StateAssignments,
     StateLabelSequence,
+    _require_matching_feature_space,
 )
 
 
@@ -113,6 +114,9 @@ class KMeansStateModel:
 class KMeansFitResult:
     model: KMeansStateModel
     assignments: StateAssignments
+    converged: bool | None = None
+    passes_completed: int | None = None
+    initialization_passes: tuple[int, ...] = ()
 
 
 def _transform_features(
@@ -153,28 +157,6 @@ def _assign(
         source_contract=model.source_contract,
         sample_interval_seconds=model.sample_interval_seconds,
     )
-
-
-def _validate_model_dataset(model: KMeansStateModel, dataset: FeatureSequenceDataset) -> None:
-    if dataset.feature_keys != model.feature_keys:
-        raise ValueError("KMeans model and dataset use different feature identities or order")
-    if dataset.source_contract != model.source_contract:
-        raise ValueError("KMeans model and dataset use different source contracts")
-    intervals_differ = (
-        (dataset.sample_interval_seconds is None) != (model.sample_interval_seconds is None)
-        or (
-            dataset.sample_interval_seconds is not None
-            and model.sample_interval_seconds is not None
-            and not np.isclose(
-                dataset.sample_interval_seconds,
-                model.sample_interval_seconds,
-                rtol=0.0,
-                atol=1e-9,
-            )
-        )
-    )
-    if intervals_differ:
-        raise ValueError("KMeans model and dataset use different sample intervals")
 
 
 def fit_kmeans_states(
@@ -331,7 +313,7 @@ def predict_kmeans_states(
     allow_fit_subjects: bool = False,
 ) -> StateAssignments:
     """Assign samples, rejecting train/test subject overlap by default."""
-    _validate_model_dataset(model, dataset)
+    _require_matching_feature_space(model, dataset, label="KMeans")
     if not isinstance(allow_fit_subjects, (bool, np.bool_)):
         raise TypeError("allow_fit_subjects must be boolean")
     overlap = sorted(set(model.fit_subjects).intersection(dataset.subjects))

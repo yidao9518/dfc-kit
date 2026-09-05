@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
-import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from ..connectivity.correlation import fisher_z_edges, weighted_correlation
+from ..data import TimeSeriesDataset
 from ._statistics import StreamingFeatureMoments
 from .store import FeatureStore
 
@@ -110,6 +110,52 @@ def summarize_store_statistics(
     }
 
 
+def summarize_static_fc_dataset(dataset: TimeSeriesDataset) -> dict[str, Any]:
+    """Return whole-acquisition Fisher-z FC endpoints for a dataset."""
+    if not isinstance(dataset, TimeSeriesDataset):
+        raise TypeError("dataset must be a TimeSeriesDataset")
+    rows = []
+    edge_names: tuple[tuple[str, str], ...] | None = None
+    for run in dataset.runs:
+        values, edge_i, edge_j = fisher_z_edges(weighted_correlation(run.values))
+        current_names = tuple(
+            (run.roi_names[int(left)], run.roi_names[int(right)])
+            for left, right in zip(edge_i, edge_j, strict=True)
+        )
+        if edge_names is None:
+            edge_names = current_names
+        elif current_names != edge_names:
+            raise RuntimeError("static FC edge order changed between acquisitions")
+        rows.extend(
+            {
+                "subject": run.subject,
+                "session": run.session,
+                "acquisition_id": run.acquisition_id,
+                "endpoint": f"feature_{index}.mean",
+                "feature": list(feature),
+                "statistic": "mean",
+                "measure": "whole_acquisition_fisher_z_fc",
+                "value": float(value),
+                "n_samples": run.n_frames,
+            }
+            for index, (feature, value) in enumerate(
+                zip(current_names, values, strict=True)
+            )
+        )
+    assert edge_names is not None
+    return {
+        "format": "dfc-kit-store-endpoints",
+        "format_version": 2,
+        "source_contract": "static-fc:retained-xcpd-frames:fisher-z:v1",
+        "summary": "whole-acquisition Fisher-z FC over retained XCP-D frames",
+        "statistics": ["mean"],
+        "feature_type": "edge",
+        "n_features": len(edge_names),
+        "n_acquisitions": dataset.n_runs,
+        "rows": rows,
+    }
+
+
 def _summarize_store_file(
     path: str | Path,
     statistics: Sequence[str] = ("mean",),
@@ -118,23 +164,12 @@ def _summarize_store_file(
 
 
 def _write_store_summary(payload: dict[str, Any], path: str | Path) -> Path:
-    target = Path(path)
-    if target.exists() or target.is_symlink():
-        raise FileExistsError(f"store-summary output already exists: {target}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.tmp-{os.getpid()}")
-    try:
-        temporary.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, target)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
-    return target
+    from ..artifacts._json import write_json_atomic
+
+    return write_json_atomic(path, payload)
 
 
 __all__ = [
+    "summarize_static_fc_dataset",
     "summarize_store_statistics",
 ]

@@ -9,6 +9,15 @@ from ..inference.endpoints import (
     _infer_paired_endpoints_file,
     _write_paired_endpoint_inference,
 )
+from ..inference.independent_endpoints import (
+    infer_independent_endpoints_file,
+    load_group_covariates,
+    write_independent_endpoint_inference,
+)
+from ..inference.nbs_endpoints import (
+    infer_paired_nbs_file,
+    load_nbs_confounds,
+)
 from ..inference.state_metrics import (
     _infer_paired_state_metrics_file,
     _write_paired_state_inference,
@@ -55,6 +64,7 @@ def infer_state_metrics(namespace: argparse.Namespace) -> dict[str, object]:
         n_bootstrap=namespace.bootstrap,
         seed=namespace.seed,
         exact=namespace.exact,
+        within_condition_aggregation=namespace.within_condition_aggregation,
     )
     output = _write_paired_state_inference(payload, namespace.output)
     counts = {
@@ -93,19 +103,95 @@ def infer_endpoints(namespace: argparse.Namespace) -> dict[str, object]:
         condition_a=namespace.condition_a,
         condition_b=namespace.condition_b,
         fdr_family=namespace.fdr_family,
+        endpoint_names=namespace.endpoint,
         alpha=namespace.alpha,
         n_permutations=namespace.permutations,
         n_bootstrap=namespace.bootstrap,
         seed=namespace.seed,
         exact=namespace.exact,
+        within_condition_aggregation=namespace.within_condition_aggregation,
     )
     output = _write_paired_endpoint_inference(payload, namespace.output)
     return {
         "output": str(output),
         "contrast": payload["contrast"],
         "fdr_family": payload["fdr_family"],
+        "endpoint_selection": payload["endpoint_selection"],
         "n_endpoints": payload["n_endpoints"],
         "n_tested": payload["n_tested"],
+    }
+
+
+def infer_independent_endpoints(namespace: argparse.Namespace) -> dict[str, object]:
+    """Run HC3 group models over two independent endpoint cohorts."""
+    if (namespace.covariates is None) != (not namespace.covariate):
+        raise ValueError("--covariates and at least one --covariate must be supplied together")
+    names = tuple(namespace.covariate)
+    covariates = (
+        None
+        if namespace.covariates is None
+        else load_group_covariates(
+            namespace.covariates,
+            covariate_names=names,
+            group_column=namespace.group_column,
+            subject_column=namespace.subject_column,
+        )
+    )
+    payload = infer_independent_endpoints_file(
+        namespace.endpoints_a,
+        namespace.endpoints_b,
+        group_a=namespace.group_a,
+        group_b=namespace.group_b,
+        fdr_family=namespace.fdr_family,
+        alpha=namespace.alpha,
+        within_group_aggregation=namespace.within_group_aggregation,
+        covariates=covariates,
+        covariate_names=names,
+    )
+    output = write_independent_endpoint_inference(payload, namespace.output)
+    return {
+        "output": str(output),
+        "contrast": payload["contrast"],
+        "fdr_family": payload["fdr_family"],
+        "n_endpoints": payload["n_endpoints"],
+        "n_tested": payload["n_tested"],
+    }
+
+
+def infer_nbs(namespace: argparse.Namespace) -> dict[str, object]:
+    """Run paired NBS over one edge statistic from a store summary."""
+    if (namespace.confounds is None) != (not namespace.confound):
+        raise ValueError("--confounds and at least one --confound must be supplied together")
+    confounds = (
+        None
+        if namespace.confounds is None
+        else load_nbs_confounds(namespace.confounds, tuple(namespace.confound))
+    )
+    payload = infer_paired_nbs_file(
+        namespace.endpoints,
+        condition_a=namespace.condition_a,
+        condition_b=namespace.condition_b,
+        statistic=namespace.statistic,
+        thresholds=tuple(namespace.threshold),
+        n_permutations=namespace.permutations,
+        seed=namespace.seed,
+        alpha=namespace.alpha,
+        alternative=namespace.alternative,
+        component_statistic=namespace.component_statistic,
+        component_sign_mode=namespace.component_sign_mode,
+        within_condition_aggregation=namespace.within_condition_aggregation,
+        confounds_by_subject=confounds,
+        confound_names=tuple(namespace.confound),
+    )
+    output = _write_paired_endpoint_inference(payload, namespace.output)
+    return {
+        "output": str(output),
+        "contrast": payload["contrast"],
+        "n_subjects": payload["n_subjects"],
+        "n_nodes": len(payload["node_names"]),
+        "n_edges": len(payload["edges"]),
+        "n_components": len(payload["results"]),
+        "thresholds": payload["thresholds"],
     }
 
 

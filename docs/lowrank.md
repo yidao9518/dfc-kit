@@ -2,8 +2,8 @@
 
 `dfckit.connectivity.LowRankCovariance` measures whether multivariate ROI
 activity inside a fixed window is organized around a small covariance
-subspace. It operates on `TimeSeriesRun`, so windows and comparisons between
-adjacent windows remain bounded by XCP-D censor segments.
+subspace. It operates on `TimeSeriesRun`, so all window comparisons remain
+bounded by XCP-D censor segments.
 
 This method describes shared covariance geometry. It does not estimate the
 direction, amount, or causal route of information transfer between ROIs.
@@ -69,9 +69,24 @@ within-subspace rotations from changing the aggregate geometry.
 `adjacent_left_windows` and `adjacent_right_windows`; a censor gap therefore
 cannot silently become a temporal transition.
 
+`all_pair_similarity` first averages every unordered window pair within each
+retained segment. Segment means are weighted by `m - 1`, where `m` is the
+number of windows in that segment. This matches the contribution of that
+segment to the adjacent-pair mean and prevents the quadratic number of pairs
+in a long segment from changing its weight. The result is stored as one row per
+eligible segment, with weights in `all_pair_weights`.
+
+`adjacency_excess` is the segment-level adjacent mean minus the corresponding
+all-pair mean. Its weighted acquisition mean isolates how much more similar
+the observed consecutive windows are than the order-insensitive within-segment
+expectation. A change in all-pair similarity alone describes configuration
+homogeneity; it does not establish an order-specific persistence effect.
+
 ## Example
 
 ```python
+import numpy as np
+
 from dfckit.connectivity import LowRankCovariance
 from dfckit.io import load_xcpd_run
 
@@ -94,10 +109,12 @@ k4 = result.rank_index(4)
 print(result.eigen_concentration[:, k4].mean())
 print(result.heldout_r2[:, k4].mean())
 print(result.adjacent_similarity[:, k4].mean())
+print(np.average(result.all_pair_similarity[:, k4], weights=result.all_pair_weights))
+print(np.average(result.adjacency_excess[:, k4], weights=result.all_pair_weights))
 ```
 
 Run bases may be compared with `subspace_similarity` or
 `subspace_distance`. A healthy-reference basis must be fitted using only the
 declared reference participants; healthy-reference fitting and participant
-provenance are a separate `v0.2` utility rather than implicit behavior of this
-estimator.
+identity checks are handled by the separate reference utilities rather than
+implicit behavior of this estimator.

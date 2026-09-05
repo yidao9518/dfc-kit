@@ -14,6 +14,7 @@ from .data import (
     FeatureSequenceDataset,
     StateAssignments,
     StateLabelSequence,
+    _require_matching_feature_space,
 )
 
 
@@ -105,6 +106,48 @@ def _optional_dependencies():
     return hmmlearn, sklearn, GaussianHMM, PCA
 
 
+def _fit_reduced_hmm(
+    observations: NDArray[np.float64],
+    lengths: list[int],
+    *,
+    n_states: int,
+    covariance_type: str,
+    n_iter: int,
+    tol: float,
+    seed: int,
+    n_init: int,
+) -> dict[str, object]:
+    """Fit the same multi-start HMM kernel after either PCA preparation path."""
+    _, _, GaussianHMM, _ = _optional_dependencies()
+    initialization_seeds = tuple(int(seed) + index for index in range(int(n_init)))
+    estimators = []
+    likelihoods = np.empty(int(n_init), dtype=float)
+    for index, initialization_seed in enumerate(initialization_seeds):
+        estimator = GaussianHMM(
+            n_components=int(n_states), covariance_type=covariance_type,
+            n_iter=int(n_iter), tol=float(tol), random_state=initialization_seed, verbose=False,
+        ).fit(observations, lengths)
+        likelihoods[index] = estimator.score(observations, lengths)
+        estimators.append(estimator)
+    selected = int(np.argmax(likelihoods))
+    best = estimators[selected]
+    covariances = np.asarray(best.covars_, dtype=float)
+    if covariances.shape != (n_states, observations.shape[1], observations.shape[1]):
+        raise RuntimeError(f"hmmlearn returned an unexpected covariance shape: {covariances.shape}")
+    return {
+        "start_probabilities": _readonly(best.startprob_),
+        "transition_matrix": _readonly(best.transmat_),
+        "reduced_means": _readonly(best.means_),
+        "reduced_covariances": _readonly(covariances),
+        "n_states": int(n_states), "covariance_type": covariance_type,
+        "seed": int(seed), "n_init": int(n_init), "n_iter": int(n_iter), "tol": float(tol),
+        "selected_initialization": selected, "initialization_seeds": initialization_seeds,
+        "initialization_log_likelihoods": _readonly(likelihoods),
+        "iterations": int(best.monitor_.iter), "converged": bool(best.monitor_.converged),
+        "log_likelihood": float(likelihoods[selected]),
+    }
+
+
 def _eligible_sequences(
     dataset: FeatureSequenceDataset,
     minimum_length: int,
@@ -112,31 +155,6 @@ def _eligible_sequences(
     return tuple(
         sequence for sequence in dataset.sequences if sequence.n_samples >= minimum_length
     )
-
-
-def _validate_model_dataset(
-    model: GaussianHMMStateModel,
-    dataset: FeatureSequenceDataset,
-) -> None:
-    if dataset.feature_keys != model.feature_keys:
-        raise ValueError("Gaussian HMM and dataset use different feature identities or order")
-    if dataset.source_contract != model.source_contract:
-        raise ValueError("Gaussian HMM and dataset use different source contracts")
-    intervals_differ = (
-        (dataset.sample_interval_seconds is None) != (model.sample_interval_seconds is None)
-        or (
-            dataset.sample_interval_seconds is not None
-            and model.sample_interval_seconds is not None
-            and not np.isclose(
-                dataset.sample_interval_seconds,
-                model.sample_interval_seconds,
-                rtol=0.0,
-                atol=1e-9,
-            )
-        )
-    )
-    if intervals_differ:
-        raise ValueError("Gaussian HMM and dataset use different sample intervals")
 
 
 def _transform_sequences(
@@ -176,23 +194,15 @@ def _reconstruct_estimator(model: GaussianHMMStateModel):
     return estimator
 
 
-def _decode(
-    model: GaussianHMMStateModel,
-    dataset: FeatureSequenceDataset,
-) -> GaussianHMMStateResult:
-    _validate_model_dataset(model, dataset)
-    sequences = _eligible_sequences(dataset, model.minimum_sequence_length)
-    if not sequences:
-        raise ValueError("no feature sequence meets the HMM minimum sequence length")
-    reduced = _transform_sequences(model, sequences)
+def _decode_reduced(model: GaussianHMMStateModel, sequences, reduced) -> GaussianHMMStateResult:
+    """Decode reduced observations and restore each original sequence boundary."""
     lengths = [len(values) for values in reduced]
     observations = np.concatenate(reduced, axis=0)
     estimator = _reconstruct_estimator(model)
     labels = np.asarray(estimator.predict(observations, lengths), dtype=np.int64)
     log_likelihood, posterior = estimator.score_samples(observations, lengths)
-
-    label_sequences: list[StateLabelSequence] = []
-    posterior_sequences: list[NDArray[np.float64]] = []
+    label_sequences = []
+    posterior_sequences = []
     offset = 0
     for sequence, length in zip(sequences, lengths, strict=True):
         selected = slice(offset, offset + length)
@@ -219,6 +229,17 @@ def _decode(
         posterior_probabilities=tuple(posterior_sequences),
         log_likelihood=float(log_likelihood),
     )
+
+
+def _decode(
+    model: GaussianHMMStateModel,
+    dataset: FeatureSequenceDataset,
+) -> GaussianHMMStateResult:
+    _require_matching_feature_space(model, dataset, label="Gaussian HMM")
+    sequences = _eligible_sequences(dataset, model.minimum_sequence_length)
+    if not sequences:
+        raise ValueError("no feature sequence meets the HMM minimum sequence length")
+    return _decode_reduced(model, sequences, _transform_sequences(model, sequences))
 
 
 def fit_gaussian_hmm_states(
@@ -256,7 +277,7 @@ def fit_gaussian_hmm_states(
     if minimum_sequence_length < 2:
         raise ValueError("minimum_sequence_length must be at least two")
 
-    hmmlearn, sklearn, GaussianHMM, PCA = _optional_dependencies()
+    hmmlearn, sklearn, _, PCA = _optional_dependencies()
     sequences = _eligible_sequences(dataset, int(minimum_sequence_length))
     if not sequences:
         raise ValueError("no feature sequence meets the HMM minimum sequence length")
@@ -294,29 +315,11 @@ def fit_gaussian_hmm_states(
         reduced_observations = pca.transform(standardized)
 
     lengths = [sequence.n_samples for sequence in sequences]
-    initialization_seeds = tuple(int(seed) + index for index in range(int(n_init)))
-    estimators = []
-    likelihoods = np.empty(int(n_init), dtype=float)
-    for index, initialization_seed in enumerate(initialization_seeds):
-        estimator = GaussianHMM(
-            n_components=int(n_states),
-            covariance_type=covariance_type,
-            n_iter=int(n_iter),
-            tol=float(tol),
-            random_state=initialization_seed,
-            verbose=False,
-        ).fit(reduced_observations, lengths)
-        likelihoods[index] = estimator.score(reduced_observations, lengths)
-        estimators.append(estimator)
-    selected = int(np.argmax(likelihoods))
-    best = estimators[selected]
-    reduced_covariances = np.asarray(best.covars_, dtype=float)
-    if reduced_covariances.shape != (n_states, component_count, component_count):
-        raise RuntimeError(
-            "hmmlearn returned an unexpected covariance shape: "
-            f"{reduced_covariances.shape}"
-        )
-    standardized_means = best.means_ @ pca_components + pca_mean
+    fitted = _fit_reduced_hmm(
+        reduced_observations, lengths, n_states=n_states, covariance_type=covariance_type,
+        n_iter=n_iter, tol=tol, seed=seed, n_init=n_init,
+    )
+    standardized_means = fitted["reduced_means"] @ pca_components + pca_mean
     emission_means = standardized_means * feature_scale + feature_mean
     emission_covariances = np.empty(
         (n_states, observations.shape[1], observations.shape[1]),
@@ -325,15 +328,12 @@ def fit_gaussian_hmm_states(
     scale_outer = np.outer(feature_scale, feature_scale)
     for state in range(n_states):
         standardized_covariance = (
-            pca_components.T @ reduced_covariances[state] @ pca_components
+            pca_components.T @ fitted["reduced_covariances"][state] @ pca_components
         )
         emission_covariances[state] = standardized_covariance * scale_outer
 
     model = GaussianHMMStateModel(
-        start_probabilities=_readonly(best.startprob_),
-        transition_matrix=_readonly(best.transmat_),
-        reduced_means=_readonly(best.means_),
-        reduced_covariances=_readonly(reduced_covariances),
+        **fitted,
         emission_means=_readonly(emission_means),
         emission_covariances=_readonly(emission_covariances),
         feature_mean=_readonly(feature_mean),
@@ -344,21 +344,9 @@ def fit_gaussian_hmm_states(
         feature_keys=dataset.feature_keys,
         source_contract=dataset.source_contract,
         sample_interval_seconds=dataset.sample_interval_seconds,
-        n_states=int(n_states),
         n_pca_components=component_count,
-        covariance_type=covariance_type,
-        seed=int(seed),
-        n_init=int(n_init),
-        n_iter=int(n_iter),
-        tol=float(tol),
         minimum_sequence_length=int(minimum_sequence_length),
         pca_batch_size=None,
-        selected_initialization=selected,
-        initialization_seeds=initialization_seeds,
-        initialization_log_likelihoods=_readonly(likelihoods),
-        iterations=int(best.monitor_.iter),
-        converged=bool(best.monitor_.converged),
-        log_likelihood=float(likelihoods[selected]),
         fit_subjects=tuple(dict.fromkeys(sequence.subject for sequence in sequences)),
         fit_sample_count=len(reduced_observations),
         fit_sequence_count=len(sequences),
@@ -378,7 +366,7 @@ def predict_gaussian_hmm_states(
     allow_fit_subjects: bool = False,
 ) -> GaussianHMMStateResult:
     """Decode held-out sequences, rejecting fit-subject overlap by default."""
-    _validate_model_dataset(model, dataset)
+    _require_matching_feature_space(model, dataset, label="Gaussian HMM")
     if not isinstance(allow_fit_subjects, (bool, np.bool_)):
         raise TypeError("allow_fit_subjects must be boolean")
     overlap = sorted(set(model.fit_subjects).intersection(dataset.subjects))

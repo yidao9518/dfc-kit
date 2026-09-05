@@ -8,4 +8,4 @@ __all__ = [
     "TimeWindow",
     "validate_subject_disjoint",
 ]
-__version__ = "1.0.0"
+__version__ = "1.0.1"

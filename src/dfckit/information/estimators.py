@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from collections.abc import Iterable, Iterator
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from functools import partial
+from itertools import islice
+from multiprocessing import get_context
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -91,43 +95,7 @@ def knn_mi(
     Estimates are not clipped at zero because finite-sample kNN estimates may be
     slightly negative.
     """
-    neighbors = validated_integer(k, label="k", minimum=1)
-    noise = _validated_jitter(jitter)
-    jitter_seed = validated_seed(seed, label="seed")
-    left = _validated_scalar(x, label="x")
-    right = _validated_scalar(y, label="y")
-    if len(left) != len(right):
-        raise ValueError("x and y must contain the same number of samples")
-    if len(left) <= neighbors + 2:
-        raise ValueError("MI requires more than k + 2 samples")
-
-    _, tree_type, digamma = _information_dependencies()
-    joint_values = _jitter_columns(
-        np.column_stack((left, right)), magnitude=noise, seed=jitter_seed
-    )
-    joint = tree_type(joint_values)
-    distance, _ = joint.query(joint_values, k=neighbors + 1, p=np.inf)
-    radius = np.nextafter(distance[:, -1], 0.0)
-    left_counts = (
-        tree_type(joint_values[:, [0]]).query_ball_point(
-            joint_values[:, [0]], radius, p=np.inf, return_length=True
-        )
-        - 1
-    )
-    right_counts = (
-        tree_type(joint_values[:, [1]]).query_ball_point(
-            joint_values[:, [1]], radius, p=np.inf, return_length=True
-        )
-        - 1
-    )
-    estimate = (
-        digamma(neighbors)
-        + digamma(len(joint_values))
-        - np.mean(digamma(left_counts + 1) + digamma(right_counts + 1))
-    )
-    if not np.isfinite(estimate):
-        raise ValueError("MI estimate is non-finite")
-    return float(estimate)
+    return _knn_information((x, y), k=k, jitter=jitter, seed=seed)
 
 
 def knn_cmi(
@@ -140,49 +108,54 @@ def knn_cmi(
     seed: int = DEFAULT_JITTER_SEED,
 ) -> float:
     """Estimate scalar ``I(X; Y | Z)`` with the Frenzel-Pompe kNN estimator."""
+    return _knn_information((x, y, z), k=k, jitter=jitter, seed=seed)
+
+
+def _knn_information(series: tuple[ArrayLike, ...], *, k: int, jitter: float, seed: int) -> float:
+    """Share neighbourhood setup while keeping the MI and CMI formulas distinct."""
     neighbors = validated_integer(k, label="k", minimum=1)
     noise = _validated_jitter(jitter)
     jitter_seed = validated_seed(seed, label="seed")
-    left = _validated_scalar(x, label="x")
-    right = _validated_scalar(y, label="y")
-    condition = _validated_scalar(z, label="z")
-    if len({len(left), len(right), len(condition)}) != 1:
-        raise ValueError("x, y, and z must contain the same number of samples")
-    if len(left) <= neighbors + 2:
-        raise ValueError("CMI requires more than k + 2 samples")
-
+    columns = tuple(_validated_scalar(values, label=label) for values, label in zip(series, "xyz"))
+    conditional = len(columns) == 3
+    method = "CMI" if conditional else "MI"
+    if len({len(column) for column in columns}) != 1:
+        labels = "x, y, and z" if conditional else "x and y"
+        raise ValueError(f"{labels} must contain the same number of samples")
+    if len(columns[0]) <= neighbors + 2:
+        raise ValueError(f"{method} requires more than k + 2 samples")
     _, tree_type, digamma = _information_dependencies()
-    joint_values = _jitter_columns(
-        np.column_stack((left, right, condition)), magnitude=noise, seed=jitter_seed
-    )
+    # Keep the original two- versus three-column draws: CMI jitter is not reused for MI.
+    joint_values = _jitter_columns(np.column_stack(columns), magnitude=noise, seed=jitter_seed)
     joint = tree_type(joint_values)
     distance, _ = joint.query(joint_values, k=neighbors + 1, p=np.inf)
     radius = np.nextafter(distance[:, -1], 0.0)
-    condition_counts = (
-        tree_type(joint_values[:, [2]]).query_ball_point(
-            joint_values[:, [2]], radius, p=np.inf, return_length=True
+
+    def counts(indices: list[int]) -> NDArray[np.int64]:
+        marginal = joint_values[:, indices]
+        return (
+            tree_type(marginal).query_ball_point(marginal, radius, p=np.inf, return_length=True) - 1
         )
-        - 1
-    )
-    left_condition_counts = (
-        tree_type(joint_values[:, [0, 2]]).query_ball_point(
-            joint_values[:, [0, 2]], radius, p=np.inf, return_length=True
+
+    if conditional:
+        condition_counts = counts([2])
+        left_condition_counts = counts([0, 2])
+        right_condition_counts = counts([1, 2])
+        estimate = digamma(neighbors) + np.mean(
+            digamma(condition_counts + 1)
+            - digamma(left_condition_counts + 1)
+            - digamma(right_condition_counts + 1)
         )
-        - 1
-    )
-    right_condition_counts = (
-        tree_type(joint_values[:, [1, 2]]).query_ball_point(
-            joint_values[:, [1, 2]], radius, p=np.inf, return_length=True
+    else:
+        left_counts = counts([0])
+        right_counts = counts([1])
+        estimate = (
+            digamma(neighbors)
+            + digamma(len(joint_values))
+            - np.mean(digamma(left_counts + 1) + digamma(right_counts + 1))
         )
-        - 1
-    )
-    estimate = digamma(neighbors) + np.mean(
-        digamma(condition_counts + 1)
-        - digamma(left_condition_counts + 1)
-        - digamma(right_condition_counts + 1)
-    )
     if not np.isfinite(estimate):
-        raise ValueError("CMI estimate is non-finite")
+        raise ValueError(f"{method} estimate is non-finite")
     return float(estimate)
 
 
@@ -392,6 +365,55 @@ class FixedLengthInformationResult:
     implementation: str
 
 
+def _estimate_information_blocks(
+    windows: Iterable[NDArray[np.float64]],
+    left: Iterable[int],
+    right: Iterable[int],
+    *,
+    conditioning: Iterable[int] | None = None,
+    standardize: bool = True,
+    k: int = 3,
+    jitter: float = 1e-10,
+    jitter_seed: int = DEFAULT_JITTER_SEED,
+    jobs: int = 1,
+) -> Iterator[BlockInformationResult]:
+    """Estimate an ordered window stream with one bounded process pool.
+
+    Only the current windows are sent to workers. Seeds belong to the estimator,
+    not the worker or completion order; all scalar kernels stay single-worker.
+    """
+    worker_count = validated_integer(jobs, label="jobs", minimum=1)
+    estimate = partial(
+        block_information,
+        left=tuple(left),
+        right=tuple(right),
+        conditioning=None if conditioning is None else tuple(conditioning),
+        standardize=standardize,
+        k=validated_integer(k, label="k", minimum=1),
+        jitter=_validated_jitter(jitter),
+        seed=validated_seed(jitter_seed, label="jitter_seed"),
+    )
+    _information_dependencies()
+    if worker_count == 1:
+        yield from map(estimate, windows)
+        return
+
+    iterator = iter(windows)
+    with ProcessPoolExecutor(max_workers=worker_count, mp_context=get_context("spawn")) as executor:
+        pending = deque()
+        try:
+            for window in islice(iterator, 2 * worker_count):
+                pending.append(executor.submit(estimate, window))
+            while pending:
+                result = pending.popleft().result()
+                for window in islice(iterator, 1):
+                    pending.append(executor.submit(estimate, window))
+                yield result
+        finally:
+            for future in pending:
+                future.cancel()
+
+
 def _estimate_fixed_windows(
     samples: FixedWindowSamples,
     left: Iterable[int],
@@ -412,28 +434,19 @@ def _estimate_fixed_windows(
         raise ValueError("window length must be greater than k + 2")
     tie_jitter = _validated_jitter(jitter)
     tie_seed = validated_seed(jitter_seed, label="jitter_seed")
-    worker_count = validated_integer(jobs, label="jobs", minimum=1)
-    left_nodes = tuple(left)
-    right_nodes = tuple(right)
-    condition_nodes = None if conditioning is None else tuple(conditioning)
-
-    def estimate(window: NDArray[np.float64]) -> BlockInformationResult:
-        return block_information(
-            window,
-            left_nodes,
-            right_nodes,
-            conditioning=condition_nodes,
+    estimates = tuple(
+        _estimate_information_blocks(
+            samples.values,
+            left,
+            right,
+            conditioning=conditioning,
             standardize=standardize,
             k=neighbors,
             jitter=tie_jitter,
-            seed=tie_seed,
+            jitter_seed=tie_seed,
+            jobs=jobs,
         )
-
-    if worker_count == 1:
-        estimates = tuple(estimate(window) for window in samples.values)
-    else:
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            estimates = tuple(executor.map(estimate, samples.values))
+    )
     first = estimates[0]
     conditional = (
         None
@@ -457,34 +470,34 @@ def _estimate_fixed_windows(
     scipy, _, _ = _information_dependencies()
     return FixedLengthInformationResult(
         samples=samples,
-        mutual_information=_readonly(
-            np.stack([result.mutual_information for result in estimates])
-        ),
-        conditional_mutual_information=(
-            None if conditional is None else _readonly(conditional)
-        ),
+        mutual_information=_readonly(np.stack([result.mutual_information for result in estimates])),
+        conditional_mutual_information=(None if conditional is None else _readonly(conditional)),
         mean_mutual_information=_readonly(
             np.asarray([result.mean_mutual_information for result in estimates])
         ),
         mean_conditional_mutual_information=(
             None if mean_conditional is None else _readonly(mean_conditional)
         ),
-        left_indices=first.left_indices,
-        right_indices=first.right_indices,
-        conditioning_indices=first.conditioning_indices,
+        left_indices=_readonly(first.left_indices),
+        right_indices=_readonly(first.right_indices),
+        conditioning_indices=(
+            None if first.conditioning_indices is None else _readonly(first.conditioning_indices)
+        ),
         standardized=bool(standardize),
         k=neighbors,
         metric=INFORMATION_METRIC,
         jitter=tie_jitter,
         jitter_seed=tie_seed,
-        implementation=(
-            f"scipy {scipy.__version__} cKDTree; Kraskov MI and Frenzel-Pompe CMI"
-        ),
+        implementation=(f"scipy {scipy.__version__} cKDTree; Kraskov MI and Frenzel-Pompe CMI"),
     )
 
 
 class FixedLengthInformation:
-    """Estimate block MI/CMI on equally long, censor-safe Monte Carlo windows."""
+    """Estimate block MI/CMI on equally long, censor-safe Monte Carlo windows.
+
+    ``jobs > 1`` distributes windows over worker processes. Script entrypoints
+    must guard calls with ``if __name__ == "__main__":`` for process spawning.
+    """
 
     def __init__(
         self,

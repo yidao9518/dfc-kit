@@ -139,6 +139,19 @@ change during later appends.
 
 ## Acquisition-level feature statistics
 
+Whole-acquisition static FC uses the same endpoint schema without an
+intermediate FeatureStore:
+
+```python
+from dfckit.storage import summarize_static_fc_dataset
+
+static_payload = summarize_static_fc_dataset(dataset)
+```
+
+Each retained XCP-D acquisition contributes one complete upper-triangular
+Fisher-z FC vector; subject, session, acquisition, ROI-pair identity, and the
+number of retained frames remain attached to every endpoint row.
+
 Feature rows can be reduced to one endpoint per acquisition, feature, and
 requested statistic without materializing the store:
 
@@ -179,6 +192,9 @@ fit = fit_minibatch_kmeans_store(
     n_init=10,
     max_iter=10,
     batch_size=4096,
+    convergence_tol=1e-4,
+    convergence_patience=3,
+    minimum_passes=2,
 )
 held_out_assignments = predict_kmeans_store(fit.model, held_out_store)
 ```
@@ -186,15 +202,20 @@ held_out_assignments = predict_kmeans_store(fit.model, held_out_store)
 The fitter performs a bounded-memory, batch-combined Welford pass for the
 feature mean and population standard deviation. A deterministic uniform sample
 from the global selected-row axis supplies k-means++ initial centres. Each
-initialization then makes `max_iter` complete passes with `partial_fit`; the
-candidate with the smallest inertia over all selected rows is retained. The
-initialization sample is representative but is not treated as a separate
-dataset contract.
+initialization then makes at most `max_iter` complete passes with `partial_fit`.
+After each pass, the fitter measures relative center drift as
+`||C_new - C_old|| / max(||C_old||, epsilon)`. It stops when drift stays below
+`convergence_tol` for `convergence_patience` consecutive passes and at least
+`minimum_passes` have completed. Set `convergence_tol=0` to perform exactly
+`max_iter` passes. The candidate with the smallest inertia over all selected
+rows is retained. The initialization sample is representative but is not
+treated as a separate dataset contract.
 
 The returned `KMeansFitResult` is the same result type as the in-memory state
-API. Its assignments contain only labels and original sample indices. The
-feature store itself remains memory-mapped, and prediction rejects any subject
-used for fitting by default.
+API. For the streaming path, `converged`, `passes_completed`, and
+`initialization_passes` report the stopping outcome. Its assignments contain
+only labels and original sample indices. The feature store itself remains
+memory-mapped, and prediction rejects any subject used for fitting by default.
 
 ## Materialized KMeans fitting
 
@@ -259,10 +280,9 @@ for chunk in iter_pca_store_chunks(pca, held_out_store):
     consume_reduced(chunk.values, chunk.sample_start_indices, chunk.sequence_index)
 ```
 
-`TransformedFeatureChunk` is an in-memory, read-only view of one reduced chunk;
-it is not appended to the original store and retains the source sequence and
-sample-index metadata. Constant features are rejected when standardization is
-requested.
+Each returned chunk contains read-only reduced values and retains the source
+sequence and sample-index metadata. It is not appended to the original store.
+Constant features are rejected when standardization is requested.
 
 The HMM wrapper uses the same frozen preprocessing and materializes only the
 reduced observations required by `hmmlearn`:

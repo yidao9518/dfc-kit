@@ -17,6 +17,7 @@ from dfckit.artifacts._json import (
     strict_object_hook,
     write_json_atomic,
 )
+from dfckit.artifacts._numpy import load_numpy_artifact, write_numpy_artifact
 
 
 class ArtifactFieldValidationTests(unittest.TestCase):
@@ -31,7 +32,6 @@ class ArtifactFieldValidationTests(unittest.TestCase):
         self.assertEqual(artifact_finite_float(0.8, "TR", positive=True), 0.8)
         self.assertTrue(sample_intervals_match(0.8, 0.8))
         self.assertFalse(sample_intervals_match(float("nan"), 0.8))
-
 
 class StrictJSONHookTests(unittest.TestCase):
     def test_duplicate_fields_and_nonstandard_constants_are_rejected(self):
@@ -49,6 +49,40 @@ class StrictJSONHookTests(unittest.TestCase):
                 write_json_atomic(path, {"value": 4})
             write_json_atomic(path, {"value": 4}, overwrite=True)
             self.assertEqual(load_json_object(path, context="test artifact"), {"value": 4})
+
+
+class NumPyArtifactTests(unittest.TestCase):
+    def test_common_reader_preserves_array_dtype(self):
+        with TemporaryDirectory() as temporary:
+            target = write_numpy_artifact(
+                Path(temporary) / "result",
+                {"array_names": ["indices"], "format": "test", "format_version": 1},
+                {"indices": np.asarray([1, 2], dtype=np.int64)},
+                label="test",
+            )
+            manifest, arrays = load_numpy_artifact(
+                target,
+                label="test",
+                manifest_fields={"array_names", "format", "format_version"},
+            )
+            self.assertEqual(manifest["format"], "test")
+            self.assertEqual(arrays["indices"].dtype, np.dtype(np.int64))
+
+    def test_common_reader_rejects_archive_manifest_mismatch(self):
+        with TemporaryDirectory() as temporary:
+            target = write_numpy_artifact(
+                Path(temporary) / "result",
+                {"array_names": ["values"], "format": "test"},
+                {"values": np.asarray([1.0])},
+                label="test",
+            )
+            np.savez(target / "arrays.npz", other=np.asarray([1.0]))
+            with self.assertRaisesRegex(ValueError, "arrays do not match"):
+                load_numpy_artifact(
+                    target,
+                    label="test",
+                    manifest_fields={"array_names", "format"},
+                )
 
 
 if __name__ == "__main__":

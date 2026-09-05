@@ -59,6 +59,9 @@ def fit_states(namespace: argparse.Namespace) -> dict[str, object]:
                 n_pca_components=namespace.n_pca_components,
                 pca_batch_size=namespace.pca_batch_size,
                 subjects=subjects,
+                convergence_tol=namespace.streaming_tol,
+                convergence_patience=namespace.streaming_patience,
+                minimum_passes=namespace.streaming_min_passes,
             )
         else:
             if namespace.init_sample_size is not None:
@@ -89,7 +92,9 @@ def fit_states(namespace: argparse.Namespace) -> dict[str, object]:
             "fit_sequence_count": fit_sequence_count,
             "n_states": model.n_states,
             "seed": model.seed,
-            "converged": None,
+            "converged": fit.converged,
+            "passes_completed": fit.passes_completed,
+            "initialization_passes": list(fit.initialization_passes),
             "log_likelihood": None,
             "inertia": model.inertia,
             "init_sample_size": model.init_sample_size,

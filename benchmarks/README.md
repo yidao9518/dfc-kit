@@ -1,5 +1,35 @@
 # Synthetic performance benchmarks
 
+## Fixed-length MI/CMI
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONPATH=src \
+  python benchmarks/profile_information.py --jobs 1 2 4 8 --runs 8 --draws 25
+```
+
+This benchmark generates 36 synthetic ROI time series with a censor gap and
+estimates all 12-by-4 MI/CMI pairs at five window lengths. It reports end-to-end
+time, including process startup and array transfer, and requires exact agreement
+with serial output for every numeric array and metadata field. Worker count is
+an execution setting, so changing it must not change the scientific result.
+For short batches, process startup can outweigh the gain from parallel work.
+
+Cloud reference run on 2026-09-05 (Python 3.10.14, NumPy 1.26.4,
+SciPy 1.13.0, 8 runs, 25 draws per length, 1,000 total windows):
+
+| Processes | Elapsed time | Speedup over serial | Exact output match |
+|---:|---:|---:|---|
+| 1 | 184.122 s | 1.00 | Yes |
+| 4 | 47.186 s | 3.90 | Yes |
+| 16 | 12.207 s | 15.08 | Yes |
+| 40 | 5.230 s | 35.20 | Yes |
+
+These timings include worker startup. All arrays and metadata matched the serial
+reference; the speedup describes this synthetic workload, not a guaranteed rate
+for arbitrary ROI counts, sample lengths, or machine allocations.
+
+## Feature and state methods
+
 Run each method in a separate process so `ru_maxrss` has one clear scope:
 
 ```bash

@@ -3,7 +3,14 @@
 from .endpoints import (
     infer_paired_endpoints,
 )
-from .hc3 import HC3Result, PairedHC3Result, ols_hc3, paired_hc3
+from .hc3 import (
+    HC3Result,
+    PairedHC3Result,
+    hc3_confidence_interval,
+    ols_hc3,
+    paired_hc3,
+)
+from .independent_endpoints import infer_independent_endpoints, load_group_covariates
 from .matching import (
     MatchedSubjectDifferences,
     WindowMotionSummary,
@@ -19,6 +26,7 @@ from .nbs import (
     PairedNBSResult,
     paired_nbs,
 )
+from .nbs_endpoints import infer_paired_nbs_endpoints
 from .paired import (
     BootstrapCIResult,
     PairedSignFlipResult,
@@ -42,8 +50,12 @@ __all__ = [
     "WindowMotionSummary",
     "WithinSubjectMatchResult",
     "benjamini_hochberg",
+    "hc3_confidence_interval",
+    "infer_independent_endpoints",
     "infer_paired_endpoints",
+    "infer_paired_nbs_endpoints",
     "infer_paired_state_metrics",
+    "load_group_covariates",
     "match_within_subject",
     "matched_subject_differences",
     "ols_hc3",
