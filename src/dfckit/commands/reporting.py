@@ -29,8 +29,9 @@ from ..states.interpretation import (
     write_state_description,
 )
 from ..states.selection import _write_state_count_comparison
-from ..storage.summary import _summarize_store_file, _write_store_summary
-from .states import _load_feature_keys
+from ..storage import FeatureStore, summarize_store_statistics
+from ..storage.summary import _write_store_summary
+from .states import _load_feature_keys, _selected_feature_store
 
 
 def describe_states(namespace: argparse.Namespace) -> dict[str, object]:
@@ -86,7 +87,8 @@ def infer_state_metrics(namespace: argparse.Namespace) -> dict[str, object]:
 def summarize_store(namespace: argparse.Namespace) -> dict[str, object]:
     """Write acquisition-level feature statistics from a FeatureStore."""
     statistics = tuple(namespace.statistic or ("mean",))
-    payload = _summarize_store_file(namespace.store, statistics)
+    store = _selected_feature_store(FeatureStore.open(namespace.store), namespace.feature_keys)
+    payload = summarize_store_statistics(store, statistics, feature_mean=namespace.feature_mean)
     output = _write_store_summary(payload, namespace.output)
     return {
         "output": str(output),

@@ -1,6 +1,18 @@
 # Changelog
 
-## 1.0.1 (unreleased)
+## 1.0.2 (unreleased)
+
+- Added exact-feature selection for in-memory and disk-backed state models,
+  including clustering on a fixed NBS component's edges.
+- Added conditional Granger predictability with censor-bounded lagged samples
+  and VAR diagnostics. SciPy is loaded only when those diagnostics are used,
+  preserving the NumPy-only base installation.
+- FeatureStore summaries can now aggregate a named feature set within each
+  sample before computing acquisition-level mean, variance, standard deviation,
+  and extrema. The CLI exposes `--feature-keys` and `--feature-mean NAME` for
+  fixed-network summaries, including sparse NBS components.
+
+## 1.0.1
 
 - Fixed-length MI/CMI now shares one process pool across acquisition, window
   length, and draw combinations. Bounded task submission avoids materializing

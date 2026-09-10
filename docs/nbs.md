@@ -98,6 +98,36 @@ tests reconstruct the OLS statistics with NumPy and the graph components with
 SciPy, and compare observed components and complete null arrays for both sign
 modes and for unadjusted and confound-adjusted analyses.
 
+## Summarize a component's connection strength
+
+NBS reports component size or a sum of edge t statistics; neither is its mean
+FC. To measure a fixed component in every acquisition, take its exact
+`component_edges` from an `infer-paired-nbs` result and select those keys in
+the FC store:
+
+```python
+from dfckit.storage import FeatureStore, summarize_store_statistics
+
+store = FeatureStore.open("features/window-fc.store")
+selected = store.select_features(feature_keys=component_edges)
+network_endpoints = summarize_store_statistics(
+    selected,
+    statistics=("mean", "standard_deviation"),
+    feature_mean="NBS_component",
+)
+```
+
+This averages the selected signed edge values in each window, then computes
+their network mean and temporal variability within each acquisition. Use the
+same fixed edge set in every condition. The stored edge names, not node
+membership alone, define the component: adding all connections between its
+nodes would include edges that NBS did not select. A mean of window FC is also
+distinct from whole-acquisition static FC.
+
+The generic endpoint output supports paired inference. Testing the contrast
+that selected a component on the same participants is a descriptive follow-up,
+not an independent confirmation of the NBS discovery.
+
 ## References
 
 - Zalesky A, Fornito A, Bullmore ET. Network-based statistic: identifying

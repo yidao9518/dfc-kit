@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.stats import chi2
 
 from .._arrays import readonly_copy
 from .._validation import validated_positive_integer, validated_roi_indices
@@ -130,6 +129,13 @@ def _whiteness(
     diagnostic_lags: int,
     segment_row_counts: tuple[int, ...],
 ) -> ResidualWhiteness:
+    try:
+        from scipy.stats import chi2
+    except ModuleNotFoundError as error:
+        raise ModuleNotFoundError(
+            "Conditional Granger diagnostics require the 'inference' extra: "
+            "pip install 'dfc-kit[inference]'"
+        ) from error
     n = len(residuals)
     maximum = min(diagnostic_lags, n - 1)
     if maximum < 1:

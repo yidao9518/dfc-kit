@@ -1,5 +1,11 @@
 # Conditional Granger predictability
 
+Install the inference dependency before running this analysis:
+
+```bash
+python -m pip install 'dfc-kit[inference]'
+```
+
 `conditional_granger()` fits pooled linear VAR models while constructing every
 lagged row inside one contiguous retained-frame segment. Its Geweke statistic is
 the log ratio of restricted to unrestricted target-residual variance (or

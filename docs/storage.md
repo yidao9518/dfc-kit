@@ -176,6 +176,37 @@ or `feature_12.variance`. For edge FeatureStores, one selected statistic at a
 time can be reshaped into a participants-by-edges matrix for NBS. Mixing two
 statistics in one NBS graph would duplicate every edge and is invalid.
 
+### Mean strength and variability of a fixed network
+
+Select exact edge keys, then name the feature mean to summarize the network
+instead of each edge separately:
+
+```python
+selected = store.select_features(feature_keys=component_edges)
+payload = summarize_store_statistics(
+    selected,
+    statistics=("mean", "standard_deviation"),
+    feature_mean="NBS24",
+)
+```
+
+For each sample, the selected edges are averaged with equal weights. The
+resulting network time series is then summarized separately for each
+participant, session, and acquisition. `NBS24.mean` is its temporal mean;
+`NBS24.standard_deviation` is its population standard deviation, **not** the
+average of the individual edges' standard deviations. Each retained sample
+has equal weight, including when segments or storage chunks differ in length.
+
+Values keep the store's scale and sign: a Fisher-z window-FC store produces
+means of signed Fisher-z values, without taking absolute values or applying
+another transform. These are mean-window FC summaries, not whole-acquisition
+static FC. A store with one static FC row per acquisition instead gives its
+across-edge mean and a zero temporal standard deviation.
+
+The output lists `source_feature_keys` and marks `feature_type="feature_set"`.
+It can enter `infer-paired-endpoints`, but is no longer an edge matrix for
+`infer-paired-nbs`. Omitting `feature_mean` retains per-feature summaries.
+
 ## Stream MiniBatchKMeans
 
 Feature stores can be fitted directly without calling `read_dataset()`:

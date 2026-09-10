@@ -184,6 +184,24 @@ and `maximum`. Variance and standard deviation use all retained samples with
 `ddof=0`. Censor-delimited segments remain distinct during feature generation,
 then their valid samples are combined by sample count within the acquisition.
 
+To summarize a fixed NBS component, supply its exact ROI-pair keys as a JSON
+array (for example, `[["V1_L", "PUT-DP_L"], ["V1_R", "PUT-DP_R"]]`):
+
+```bash
+dfc-kit summarize-store features/window-fc.store results/nbs24-summary.json \
+  --feature-keys nbs24-edges.json --feature-mean NBS24 \
+  --statistic mean --statistic standard_deviation
+```
+
+`--feature-keys` selects columns. `--feature-mean NAME` averages those columns
+equally within each sample, then summarizes the resulting network time series
+under `NAME.mean`, `NAME.standard_deviation`, and any other requested statistics.
+With no key file, the mean uses all store features; with no `--feature-mean`,
+selected features are summarized separately. Signed values and source units
+are preserved. Network standard deviation is computed **after** averaging
+edges, not by averaging their individual standard deviations. The resulting
+endpoint file can be used with `infer-paired-endpoints`.
+
 Use `summarize-states`, `summarize-information`, `describe-states`,
 `infer-state-metrics`, `infer-paired-endpoints`, and `infer-paired-nbs` for
 reporting and inference. Every command writes finite JSON and refuses

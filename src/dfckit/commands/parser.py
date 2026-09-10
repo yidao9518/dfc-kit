@@ -272,10 +272,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     summarize_features = subparsers.add_parser(
         "summarize-store",
-        help="write acquisition-level statistics for every named FeatureStore feature",
+        help="write acquisition-level statistics for features or their equal-weight mean",
     )
     summarize_features.add_argument("store", type=Path, help="FeatureStore to summarize")
     summarize_features.add_argument("output", type=Path, help="new endpoint-summary JSON file")
+    summarize_features.add_argument(
+        "--feature-keys",
+        type=Path,
+        help="JSON array of exact feature keys to select, such as an NBS component's edges",
+    )
+    summarize_features.add_argument(
+        "--feature-mean",
+        metavar="NAME",
+        help="average selected features within each sample before summarizing under NAME",
+    )
     summarize_features.add_argument(
         "--statistic",
         action="append",

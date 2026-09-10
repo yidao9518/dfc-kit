@@ -290,6 +290,79 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["statistics"], ["variance"])
         self.assertTrue(all(row["statistic"] == "variance" for row in payload["rows"]))
 
+    def test_selected_network_summary_then_paired_inference(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = _edge_store(root / "edges")
+            keys = root / "component-edges.json"
+            keys.write_text(json.dumps([["b", "c"], ["a", "b"]]), encoding="utf-8")
+            output = root / "network.json"
+            summary = _run(
+                [
+                    "summarize-store",
+                    str(store.root),
+                    str(output),
+                    "--feature-keys",
+                    str(keys),
+                    "--feature-mean",
+                    "NBS_component",
+                    "--statistic",
+                    "mean",
+                    "--statistic",
+                    "standard_deviation",
+                ]
+            )
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            observed = {
+                (row["subject"], row["session"], row["statistic"]): row["value"]
+                for row in payload["rows"]
+            }
+            for chunk in store.iter_chunks():
+                network = chunk.values[:, [2, 0]].mean(axis=1, dtype=np.float64)
+                self.assertAlmostEqual(
+                    observed[chunk.subject, chunk.session, "mean"], network.mean()
+                )
+                self.assertAlmostEqual(
+                    observed[chunk.subject, chunk.session, "standard_deviation"], network.std()
+                )
+            inference = _run(
+                [
+                    "infer-paired-endpoints",
+                    str(output),
+                    str(root / "inference.json"),
+                    "--condition-a",
+                    "on",
+                    "--condition-b",
+                    "off",
+                    "--fdr-family",
+                    "network",
+                    "--permutations",
+                    "50",
+                    "--bootstrap",
+                    "50",
+                    "--seed",
+                    "9",
+                ]
+            )
+            selected_path = root / "selected-edges.json"
+            _run(
+                [
+                    "summarize-store",
+                    str(store.root),
+                    str(selected_path),
+                    "--feature-keys",
+                    str(keys),
+                ]
+            )
+            selected = json.loads(selected_path.read_text(encoding="utf-8"))
+        self.assertEqual(summary["feature_type"], "feature_set")
+        self.assertEqual(summary["n_features"], 1)
+        self.assertEqual(summary["n_acquisitions"], 16)
+        self.assertEqual(inference["n_tested"], 2)
+        self.assertEqual(payload["source_feature_keys"], [["b", "c"], ["a", "b"]])
+        self.assertEqual(selected["feature_type"], "edge")
+        self.assertEqual(selected["n_features"], 2)
+
     def test_fit_predict_and_score_kmeans(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
