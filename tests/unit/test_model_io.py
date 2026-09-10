@@ -143,6 +143,12 @@ class FittedModelIOTests(unittest.TestCase):
             self.assertIn("init_sample_size", manifest["metadata"])
             self.assertIsInstance(loaded, KMeansStateModel)
             self.assertEqual(loaded.fit_subjects, model.fit_subjects)
+            self.assertEqual(loaded.sample_weight_mode, "uniform")
+            self.assertEqual(loaded.sample_weight_sum, model.fit_sample_count)
+            self.assertEqual(
+                loaded.sample_weight_effective_row_count,
+                model.fit_sample_count,
+            )
             self.assertFalse(loaded.centers.flags.writeable)
             before = predict_kmeans_states(model, heldout_dataset())
             after = predict_kmeans_states(loaded, heldout_dataset())
@@ -177,6 +183,30 @@ class FittedModelIOTests(unittest.TestCase):
         np.testing.assert_array_equal(
             before.sequences[0].labels,
             after.sequences[0].labels,
+        )
+
+    def test_kmeans_roundtrip_preserves_balanced_weight_diagnostics(self):
+        model = replace(
+            kmeans_model(),
+            sample_weight_mode="subject_session_balanced",
+            sample_weight_sum=20.0,
+            sample_weight_sum_squares=40.0,
+            sample_weight_effective_row_count=10.0,
+        )
+        with TemporaryDirectory() as temporary:
+            loaded = load_fitted_model(
+                save_fitted_model(model, Path(temporary) / "weighted-kmeans.model")
+            )
+
+        self.assertEqual(loaded.sample_weight_mode, model.sample_weight_mode)
+        self.assertEqual(loaded.sample_weight_sum, model.sample_weight_sum)
+        self.assertEqual(
+            loaded.sample_weight_sum_squares,
+            model.sample_weight_sum_squares,
+        )
+        self.assertEqual(
+            loaded.sample_weight_effective_row_count,
+            model.sample_weight_effective_row_count,
         )
 
     def test_streaming_pca_roundtrip_preserves_all_arrays(self):

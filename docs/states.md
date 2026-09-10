@@ -40,6 +40,16 @@ directly in the original edge-feature space:
 window FC edges -> training-set feature scaling -> KMeans
 ```
 
+The default `sample_weight_mode="uniform"` gives every window equal weight and
+preserves the original fitting behavior. For cohorts with unequal usable scan
+lengths, `sample_weight_mode="subject_session_balanced"` first gives every
+participant equal total weight, then divides that weight equally among the
+participant's sessions and their retained windows. The weighted mean and
+variance are used for feature scaling, and the same weights enter the Lloyd
+KMeans objective. The model records the weight sums and Kish effective row
+count; this diagnostic is not a count of statistically independent samples.
+Balanced weighting currently requires materialized Lloyd KMeans without PCA.
+
 For a lower-dimensional sensitivity path, set `n_pca_components`. PCA is fitted
 only on the training participants, and the frozen scaler and PCA basis are
 applied before KMeans:
@@ -122,6 +132,56 @@ dfc-kit summarize-states predictions/k4.labels predictions/k4.metrics.json
 The prediction artifact retains the original sequence identity and sample
 indices. The summary command applies the same gap-safe
 `summarize_state_assignments` implementation used by the Python API.
+
+## Clustering a specified feature or edge set
+
+State fitting uses every input feature by default. Restrict an in-memory
+feature dataset by exact feature identity before fitting:
+
+```python
+selected = training_sequences.select_features(
+    feature_keys=(
+        ("V1_L", "PUT-DP_L"),
+        ("V1_R", "PUT-DP_R"),
+    )
+)
+fit = fit_kmeans_states(selected, n_states=2, seed=20260907)
+```
+
+For a disk-backed store, `select_features` returns a read-only column view. It
+does not rewrite the store and works with materialized or streaming state
+fitting:
+
+```python
+store = FeatureStore.open("/path/to/window_fc.store")
+selected_store = store.select_features(feature_mask=nbs_edge_mask)
+fit = fit_minibatch_kmeans_store(
+    selected_store,
+    n_states=2,
+    seed=20260907,
+)
+```
+
+`feature_keys` are exact identities and determine output order. A Boolean
+`feature_mask` must have one entry per source feature and preserves source
+order. Fitted models record only the selected keys, so prediction must use the
+same selected view.
+
+The command line accepts the same exact ordered selection as a JSON array of
+feature-key arrays:
+
+```bash
+dfc-kit fit-states window-fc.store models/nbs-k2.model \
+  --method kmeans --n-states 2 --feature-keys nbs-edges.json \
+  --fitting-mode materialized --algorithm lloyd \
+  --sample-weight-mode subject_session_balanced
+dfc-kit predict-states window-fc.store models/nbs-k2.model labels \
+  --feature-keys nbs-edges.json --allow-fit-subjects
+```
+
+Participant-session-balanced weighting gives every acquisition sequence equal
+total influence regardless of its number of windows. It is supported only by
+materialized Lloyd KMeans; incompatible engines are rejected explicitly.
 
 ## CAP
 

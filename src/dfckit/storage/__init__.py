@@ -10,7 +10,7 @@ from .builders import (
     write_leida_store,
     write_window_fc_store,
 )
-from .store import FeatureStore
+from .store import FeatureStore, FeatureStoreView
 from .summary import (
     summarize_static_fc_dataset,
     summarize_store_statistics,
@@ -18,6 +18,7 @@ from .summary import (
 
 __all__ = [
     "FeatureStore",
+    "FeatureStoreView",
     "append_cap",
     "append_instantaneous_edges",
     "append_leida",

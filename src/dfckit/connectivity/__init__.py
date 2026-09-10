@@ -6,6 +6,11 @@ from .correlation import (
     fisher_z_edges,
     weighted_correlation,
 )
+from .granger import (
+    ConditionalGrangerResult,
+    ResidualWhiteness,
+    conditional_granger,
+)
 from .instantaneous import (
     ETS,
     MTD,
@@ -53,6 +58,7 @@ __all__ = [
     "ETS",
     "MTD",
     "AdjacentWindowSimilarityResult",
+    "ConditionalGrangerResult",
     "FixedPartitionGraph",
     "FixedPartitionGraphResult",
     "InstantaneousEdgeResult",
@@ -61,6 +67,7 @@ __all__ = [
     "LowRankCovariance",
     "LowRankCovarianceResult",
     "PartitionEdgeSummary",
+    "ResidualWhiteness",
     "SlidingWindowFC",
     "StandardizedPCA",
     "WindowFCResult",
@@ -68,6 +75,7 @@ __all__ = [
     "adjacent_window_pattern_similarity",
     "all_pair_window_pattern_similarity",
     "bidirectional_heldout_r2",
+    "conditional_granger",
     "edge_index",
     "edge_vector_to_symmetric_matrix",
     "effective_rank",

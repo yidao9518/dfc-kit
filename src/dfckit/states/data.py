@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from .._arrays import readonly_copy as _readonly
+from .._feature_selection import resolve_feature_selection
 from ..connectivity import InstantaneousEdgeResult, LEiDAResult, WindowFCResult
 from ..data import TimeSeriesDataset
 
@@ -103,6 +104,31 @@ class FeatureSequence:
     def n_features(self) -> int:
         return int(self.values.shape[1])
 
+    def select_features(
+        self,
+        *,
+        feature_keys: Sequence[Sequence[str]] | None = None,
+        feature_mask: ArrayLike | None = None,
+    ) -> FeatureSequence:
+        """Return this sequence restricted to named features or a Boolean mask."""
+        indices, selected_keys = resolve_feature_selection(
+            self.feature_keys,
+            feature_keys=feature_keys,
+            feature_mask=feature_mask,
+        )
+        return FeatureSequence(
+            values=self.values[:, indices],
+            sample_start_indices=self.sample_start_indices,
+            sample_end_indices=self.sample_end_indices,
+            feature_keys=selected_keys,
+            subject=self.subject,
+            session=self.session,
+            acquisition_id=self.acquisition_id,
+            segment_id=self.segment_id,
+            source_contract=self.source_contract,
+            sample_interval_seconds=self.sample_interval_seconds,
+        )
+
 
 @dataclass(frozen=True)
 class FeatureSequenceDataset:
@@ -168,6 +194,28 @@ class FeatureSequenceDataset:
     @property
     def n_samples(self) -> int:
         return sum(sequence.n_samples for sequence in self.sequences)
+
+    def select_features(
+        self,
+        *,
+        feature_keys: Sequence[Sequence[str]] | None = None,
+        feature_mask: ArrayLike | None = None,
+    ) -> FeatureSequenceDataset:
+        """Return the same sequences restricted to named features or a Boolean mask.
+
+        Named features are exact identities and are returned in the requested
+        order. A mask retains the original feature order.
+        """
+        _, selected_keys = resolve_feature_selection(
+            self.feature_keys,
+            feature_keys=feature_keys,
+            feature_mask=feature_mask,
+        )
+        return FeatureSequenceDataset(
+            tuple(
+                sequence.select_features(feature_keys=selected_keys) for sequence in self.sequences
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -262,10 +310,15 @@ def _segment_feature_sequences(
         raise ValueError("state modeling requires subject IDs")
     return [
         FeatureSequence(
-            values=values[positions], sample_start_indices=starts[positions],
-            sample_end_indices=ends[positions], feature_keys=feature_keys,
-            subject=source.subject, session=source.session, acquisition_id=source.acquisition_id,
-            segment_id=int(segment_id), source_contract=source_contract,
+            values=values[positions],
+            sample_start_indices=starts[positions],
+            sample_end_indices=ends[positions],
+            feature_keys=feature_keys,
+            subject=source.subject,
+            session=source.session,
+            acquisition_id=source.acquisition_id,
+            segment_id=int(segment_id),
+            source_contract=source_contract,
             sample_interval_seconds=interval,
         )
         for segment_id in dict.fromkeys(segment_ids.tolist())
@@ -286,13 +339,16 @@ def window_fc_sequences(results: Sequence[WindowFCResult]) -> FeatureSequenceDat
             (result.roi_names[int(left)], result.roi_names[int(right)])
             for left, right in zip(result.edge_i, result.edge_j, strict=True)
         )
-        contract = (
-            f"window-fc:length={result.length};step={result.step};taper={result.taper}"
-        )
+        contract = f"window-fc:length={result.length};step={result.step};taper={result.taper}"
         sequences.extend(
             _segment_feature_sequences(
-                result, result.features, result.start_frames, result.end_frames, result.segment_ids,
-                feature_keys=keys, source_contract=contract,
+                result,
+                result.features,
+                result.start_frames,
+                result.end_frames,
+                result.segment_ids,
+                feature_keys=keys,
+                source_contract=contract,
                 interval=None if result.tr is None else result.step * result.tr,
             )
         )
@@ -316,8 +372,14 @@ def leida_sequences(results: Sequence[LEiDAResult]) -> FeatureSequenceDataset:
         )
         sequences.extend(
             _segment_feature_sequences(
-                result, result.leading_vectors, result.original_indices, result.original_indices,
-                result.segment_ids, feature_keys=keys, source_contract=contract, interval=result.tr,
+                result,
+                result.leading_vectors,
+                result.original_indices,
+                result.original_indices,
+                result.segment_ids,
+                feature_keys=keys,
+                source_contract=contract,
+                interval=result.tr,
             )
         )
     return FeatureSequenceDataset(sequences)
@@ -337,9 +399,14 @@ def instantaneous_edge_sequences(
         features = result.require_features()
         sequences.extend(
             _segment_feature_sequences(
-                result, features, result.sample_start_frames, result.sample_end_frames,
-                result.segment_ids, feature_keys=result.feature_keys,
-                source_contract=result.source_contract, interval=result.tr,
+                result,
+                features,
+                result.sample_start_frames,
+                result.sample_end_frames,
+                result.segment_ids,
+                feature_keys=result.feature_keys,
+                source_contract=result.source_contract,
+                interval=result.tr,
             )
         )
     return FeatureSequenceDataset(sequences)
@@ -377,8 +444,7 @@ def timeseries_sequences(
                     acquisition_id=run.acquisition_id,
                     segment_id=segment_id,
                     source_contract=(
-                        "roi-timeseries:raw-xcpd;"
-                        f"minimum-segment-length={minimum_segment_length}"
+                        f"roi-timeseries:raw-xcpd;minimum-segment-length={minimum_segment_length}"
                     ),
                     sample_interval_seconds=run.tr,
                 )

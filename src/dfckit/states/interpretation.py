@@ -224,9 +224,12 @@ def describe_state_artifacts(
     *,
     top_features: int = 10,
     network_map_path: str | Path | None = None,
+    feature_keys: tuple[tuple[str, ...], ...] | None = None,
 ) -> dict[str, Any]:
     """Describe a supported state-model artifact using its named input features."""
     store = FeatureStore.open(store_path)
+    if feature_keys is not None:
+        store = store.select_features(feature_keys=feature_keys)
     model = load_fitted_model(model_path)
     network_map = load_network_map(network_map_path)
     if isinstance(model, KMeansStateModel):

@@ -14,6 +14,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from .._arrays import readonly_copy
+from .._feature_selection import resolve_feature_selection
 
 FeatureKey = tuple[str, ...]
 
@@ -117,9 +118,13 @@ class StoredFeatureChunk:
         if not np.isfinite(values).all() or np.any(ends < starts):
             raise ValueError("feature chunk contains invalid values or indices")
         for name, array in (
-            ("values", values), ("sample_start_indices", starts), ("sample_end_indices", ends)
+            ("values", values),
+            ("sample_start_indices", starts),
+            ("sample_end_indices", ends),
         ):
-            object.__setattr__(self, name, array if isinstance(array, np.memmap) else readonly_copy(array))
+            object.__setattr__(
+                self, name, array if isinstance(array, np.memmap) else readonly_copy(array)
+            )
 
 
 class FeatureStore:
@@ -201,9 +206,7 @@ class FeatureStore:
             raise ValueError("manifest source_contract is empty")
         interval = manifest.get("sample_interval_seconds")
         if interval is not None and (
-            not isinstance(interval, (int, float))
-            or not np.isfinite(interval)
-            or interval <= 0.0
+            not isinstance(interval, (int, float)) or not np.isfinite(interval) or interval <= 0.0
         ):
             raise ValueError("manifest sample interval is invalid")
         sequences = manifest.get("sequences")
@@ -282,10 +285,7 @@ class FeatureStore:
     def sequence_identities(
         self,
     ) -> tuple[tuple[str, str | None, str | None, int], ...]:
-        return tuple(
-            _record_identity(sequence)
-            for sequence in self._manifest["sequences"]
-        )
+        return tuple(_record_identity(sequence) for sequence in self._manifest["sequences"])
 
     @property
     def sequence_sample_counts(
@@ -570,3 +570,152 @@ class FeatureStore:
         if not sequences:
             raise ValueError("no stored feature sequences match the requested subjects")
         return FeatureSequenceDataset(sequences)
+
+    def select_features(
+        self,
+        *,
+        feature_keys: Iterable[FeatureKey] | None = None,
+        feature_mask: ArrayLike | None = None,
+    ) -> FeatureStoreView:
+        """Return a read-only, bounded-memory view over selected feature columns."""
+        indices, selected_keys = resolve_feature_selection(
+            self.feature_keys,
+            feature_keys=feature_keys,
+            feature_mask=feature_mask,
+        )
+        return FeatureStoreView(self, indices, selected_keys)
+
+
+@dataclass(frozen=True)
+class FeatureStoreView:
+    """Read-only feature-column view compatible with store-based state fitting."""
+
+    source: FeatureStore | FeatureStoreView
+    feature_indices: NDArray[np.int64]
+    feature_keys: tuple[FeatureKey, ...]
+
+    def __post_init__(self) -> None:
+        indices = np.asarray(self.feature_indices, dtype=np.int64)
+        if indices.ndim != 1 or not len(indices):
+            raise ValueError("feature_indices must select at least one feature")
+        if np.any(indices < 0) or np.any(indices >= self.source.n_features):
+            raise ValueError("feature_indices are outside the source feature space")
+        if len(set(indices.tolist())) != len(indices):
+            raise ValueError("feature_indices must be unique")
+        keys = tuple(tuple(str(part) for part in key) for key in self.feature_keys)
+        expected = tuple(self.source.feature_keys[int(index)] for index in indices)
+        if keys != expected:
+            raise ValueError("feature_keys do not match feature_indices")
+        copied = np.array(indices, dtype=np.int64, copy=True)
+        copied.setflags(write=False)
+        object.__setattr__(self, "feature_indices", copied)
+        object.__setattr__(self, "feature_keys", keys)
+
+    @property
+    def dtype(self) -> np.dtype:
+        return self.source.dtype
+
+    @property
+    def source_contract(self) -> str:
+        return self.source.source_contract
+
+    @property
+    def sample_interval_seconds(self) -> float | None:
+        return self.source.sample_interval_seconds
+
+    @property
+    def n_features(self) -> int:
+        return len(self.feature_keys)
+
+    @property
+    def n_samples(self) -> int:
+        return self.source.n_samples
+
+    @property
+    def n_sequences(self) -> int:
+        return self.source.n_sequences
+
+    @property
+    def n_chunks(self) -> int:
+        return self.source.n_chunks
+
+    @property
+    def format_version(self) -> int:
+        return self.source.format_version
+
+    @property
+    def subjects(self) -> tuple[str, ...]:
+        return self.source.subjects
+
+    @property
+    def sequence_identities(
+        self,
+    ) -> tuple[tuple[str, str | None, str | None, int], ...]:
+        return self.source.sequence_identities
+
+    @property
+    def sequence_sample_counts(
+        self,
+    ) -> tuple[tuple[tuple[str, str | None, str | None, int], int], ...]:
+        return self.source.sequence_sample_counts
+
+    def iter_chunks(
+        self,
+        *,
+        subjects: Iterable[str] | None = None,
+        mmap: bool = True,
+    ) -> Iterator[StoredFeatureChunk]:
+        for chunk in self.source.iter_chunks(subjects=subjects, mmap=mmap):
+            yield StoredFeatureChunk(
+                values=chunk.values[:, self.feature_indices],
+                sample_start_indices=chunk.sample_start_indices,
+                sample_end_indices=chunk.sample_end_indices,
+                subject=chunk.subject,
+                session=chunk.session,
+                acquisition_id=chunk.acquisition_id,
+                segment_id=chunk.segment_id,
+                sequence_index=chunk.sequence_index,
+                chunk_id=chunk.chunk_id,
+                start_in_sequence=chunk.start_in_sequence,
+                stop_in_sequence=chunk.stop_in_sequence,
+            )
+
+    def read_sequence(
+        self,
+        subject: str,
+        session: str | None,
+        segment_id: int,
+        *,
+        acquisition_id: str | None = None,
+        sample_slice: slice | None = None,
+    ) -> FeatureSequence:
+        sequence = self.source.read_sequence(
+            subject,
+            session,
+            segment_id,
+            acquisition_id=acquisition_id,
+            sample_slice=sample_slice,
+        )
+        return sequence.select_features(feature_keys=self.feature_keys)
+
+    def read_dataset(
+        self,
+        *,
+        subjects: Iterable[str] | None = None,
+    ) -> FeatureSequenceDataset:
+        return self.source.read_dataset(subjects=subjects).select_features(
+            feature_keys=self.feature_keys
+        )
+
+    def select_features(
+        self,
+        *,
+        feature_keys: Iterable[FeatureKey] | None = None,
+        feature_mask: ArrayLike | None = None,
+    ) -> FeatureStoreView:
+        indices, selected_keys = resolve_feature_selection(
+            self.feature_keys,
+            feature_keys=feature_keys,
+            feature_mask=feature_mask,
+        )
+        return FeatureStoreView(self, indices, selected_keys)

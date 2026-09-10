@@ -345,6 +345,81 @@ class CLITests(unittest.TestCase):
             )
             self.assertEqual(load_state_model_scores(score_path).n_samples, 80)
 
+    def test_materialized_kmeans_selects_ordered_features_and_balances_sessions(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = _store(root / "features")
+            feature_keys = root / "feature-keys.json"
+            feature_keys.write_text(json.dumps([["c"], ["a"]]) + "\n")
+            model_path = root / "model"
+            summary = _run(
+                [
+                    "fit-states",
+                    str(store.root),
+                    str(model_path),
+                    "--feature-keys",
+                    str(feature_keys),
+                    "--method",
+                    "kmeans",
+                    "--n-states",
+                    "2",
+                    "--seed",
+                    "17",
+                    "--n-init",
+                    "5",
+                    "--fitting-mode",
+                    "materialized",
+                    "--algorithm",
+                    "lloyd",
+                    "--max-iter",
+                    "20",
+                    "--sample-weight-mode",
+                    "subject_session_balanced",
+                ]
+            )
+            model = load_fitted_model(model_path)
+            self.assertEqual(model.feature_keys, (("c",), ("a",)))
+            self.assertEqual(model.sample_weight_mode, "subject_session_balanced")
+            self.assertEqual(summary["sample_weight_mode"], "subject_session_balanced")
+
+            predictions_path = root / "predictions"
+            _run(
+                [
+                    "predict-states",
+                    str(store.root),
+                    str(model_path),
+                    str(predictions_path),
+                    "--feature-keys",
+                    str(feature_keys),
+                    "--allow-fit-subjects",
+                ]
+            )
+            self.assertEqual(load_state_predictions(predictions_path).n_samples, 80)
+
+    def test_balanced_cli_weights_reject_streaming_kmeans(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = _store(root / "features")
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                status = main(
+                    [
+                        "fit-states",
+                        str(store.root),
+                        str(root / "model"),
+                        "--method",
+                        "kmeans",
+                        "--n-states",
+                        "2",
+                        "--seed",
+                        "17",
+                        "--sample-weight-mode",
+                        "subject_session_balanced",
+                    ]
+                )
+            self.assertEqual(status, 2)
+            self.assertIn("require materialized Lloyd", stderr.getvalue())
+
     def test_align_and_stability_use_seeds_without_content_hashes(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

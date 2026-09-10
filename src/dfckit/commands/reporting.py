@@ -30,6 +30,7 @@ from ..states.interpretation import (
 )
 from ..states.selection import _write_state_count_comparison
 from ..storage.summary import _summarize_store_file, _write_store_summary
+from .states import _load_feature_keys
 
 
 def describe_states(namespace: argparse.Namespace) -> dict[str, object]:
@@ -39,6 +40,7 @@ def describe_states(namespace: argparse.Namespace) -> dict[str, object]:
         namespace.model,
         top_features=namespace.top_features,
         network_map_path=namespace.network_map,
+        feature_keys=_load_feature_keys(namespace.feature_keys),
     )
     output = write_state_description(payload, namespace.output)
     return {

@@ -16,6 +16,7 @@ nav:
       - Architecture: architecture.md
   - Connectivity methods:
       - Correlation and sliding-window FC: correlation.md
+      - Conditional Granger predictability: granger.md
       - Instantaneous edges (ETS and MTD): instantaneous_edges.md
       - LEiDA: leida.md
       - Low-rank covariance: lowrank.md

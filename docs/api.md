@@ -60,10 +60,17 @@ store = FeatureStore.create(
     sample_interval_seconds=result.sample_interval_seconds,
 )
 store.append_dataset(dataset)
+
+# Select exact edges without duplicating the disk-backed store.
+selected = store.select_features(
+    feature_keys=(("V1_L", "PUT-DP_L"), ("V1_R", "PUT-DP_R"))
+)
 ```
 
 FeatureStore chunks are memory-mappable and retain sequence/acquisition
-boundaries. They are an execution format, not a provenance database.
+boundaries. A selected feature view preserves those boundaries and is accepted
+by the store-based state fitters. FeatureStore objects are an execution format,
+not a provenance database.
 
 ## State models
 

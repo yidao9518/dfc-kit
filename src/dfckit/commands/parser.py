@@ -174,6 +174,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fit.add_argument("store", type=Path, help="existing FeatureStore directory")
     fit.add_argument("output", type=Path, help="new fitted-model artifact directory")
+    fit.add_argument(
+        "--feature-keys",
+        type=Path,
+        help="JSON array of exact ordered feature keys to fit",
+    )
     fit.add_argument("--method", choices=("kmeans", "hmm"), required=True)
     fit.add_argument("--n-states", type=int, required=True)
     fit.add_argument("--seed", type=int, required=True)
@@ -228,6 +233,12 @@ def build_parser() -> argparse.ArgumentParser:
     fit.add_argument("--tol", type=float, default=1e-3)
     fit.add_argument("--pca-batch-size", type=int, default=4096)
     fit.add_argument("--minimum-sequence-length", type=int, default=2)
+    fit.add_argument(
+        "--sample-weight-mode",
+        choices=("uniform", "subject_session_balanced"),
+        default="uniform",
+        help="row weighting for materialized Lloyd KMeans",
+    )
 
     predict = subparsers.add_parser(
         "predict-states",
@@ -236,6 +247,11 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("store", type=Path, help="FeatureStore to decode")
     predict.add_argument("model", type=Path, help="saved fitted-model artifact")
     predict.add_argument("output", type=Path, help="new state-prediction artifact directory")
+    predict.add_argument(
+        "--feature-keys",
+        type=Path,
+        help="JSON array of exact ordered feature keys expected by the model",
+    )
     predict.add_argument(
         "--subject",
         action="append",
@@ -282,6 +298,11 @@ def build_parser() -> argparse.ArgumentParser:
     describe.add_argument("store", type=Path, help="FeatureStore used to fit the model")
     describe.add_argument("model", type=Path, help="saved KMeans or Gaussian HMM artifact")
     describe.add_argument("output", type=Path, help="new state-description JSON file")
+    describe.add_argument(
+        "--feature-keys",
+        type=Path,
+        help="JSON array of exact ordered feature keys used to fit the model",
+    )
     describe.add_argument("--top-features", type=int, default=10)
     describe.add_argument(
         "--network-map",
@@ -440,6 +461,11 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("store", type=Path, help="FeatureStore to score")
     score.add_argument("model", type=Path, help="saved fitted-model artifact")
     score.add_argument("output", type=Path, help="new held-out score JSON file")
+    score.add_argument(
+        "--feature-keys",
+        type=Path,
+        help="JSON array of exact ordered feature keys expected by the model",
+    )
     score.add_argument(
         "--subject",
         action="append",

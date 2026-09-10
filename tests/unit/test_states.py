@@ -131,9 +131,16 @@ class KMeansStateTests(unittest.TestCase):
 
     def test_kmeans_records_fit_subjects_and_is_reproducible(self):
         first = fit_kmeans_states(self.dataset, n_states=2, seed=9, n_init=10)
-        second = fit_kmeans_states(self.dataset, n_states=2, seed=9, n_init=10)
+        second = fit_kmeans_states(
+            self.dataset,
+            n_states=2,
+            seed=9,
+            n_init=10,
+            sample_weight_mode="uniform",
+        )
 
         np.testing.assert_allclose(first.model.centers, second.model.centers)
+        self.assertAlmostEqual(first.model.inertia, second.model.inertia, places=14)
         self.assertEqual(first.model.fit_subjects, self.dataset.subjects)
         self.assertEqual(first.model.seed, 9)
         self.assertEqual(first.model.algorithm, "lloyd")
@@ -141,6 +148,74 @@ class KMeansStateTests(unittest.TestCase):
             self.assertEqual(sequence.labels[0], sequence.labels[1])
             self.assertEqual(sequence.labels[2], sequence.labels[3])
             self.assertNotEqual(sequence.labels[0], sequence.labels[2])
+
+    def test_subject_session_balancing_controls_scaler_and_lloyd_objective(self):
+        def sequence(subject, session, segment, values):
+            values = np.asarray(values, dtype=float)
+            indices = np.arange(len(values), dtype=np.int64) + segment * 100
+            return FeatureSequence(
+                values=np.column_stack((values, values)),
+                sample_start_indices=indices,
+                sample_end_indices=indices,
+                feature_keys=(("visual",), ("motor",)),
+                subject=subject,
+                session=session,
+                segment_id=segment,
+                source_contract="weighted-test",
+                sample_interval_seconds=0.8,
+            )
+
+        dataset = FeatureSequenceDataset(
+            (
+                sequence("sub-a", "off", 0, [-4.0, -4.0]),
+                sequence("sub-a", "off", 1, [-4.0]),
+                sequence("sub-a", "on", 0, [4.0]),
+                sequence("sub-b", "off", 0, [8.0] * 8),
+            )
+        )
+        fit = fit_kmeans_states(
+            dataset,
+            n_states=2,
+            seed=7,
+            n_init=10,
+            sample_weight_mode="subject_session_balanced",
+        )
+
+        # sub-a has half the mass, divided equally between off and on;
+        # sub-b receives the other half regardless of its eight duplicate rows.
+        np.testing.assert_allclose(fit.model.feature_mean, [4.0, 4.0])
+        self.assertEqual(fit.model.sample_weight_mode, "subject_session_balanced")
+        self.assertAlmostEqual(fit.model.sample_weight_sum, dataset.n_samples)
+        self.assertAlmostEqual(fit.model.sample_weight_sum_squares, 16.5)
+        self.assertAlmostEqual(
+            fit.model.sample_weight_effective_row_count,
+            dataset.n_samples**2 / 16.5,
+        )
+        weights = np.asarray([1.0, 1.0, 1.0, 3.0, *([0.75] * 8)])
+        pooled = np.concatenate([item.values for item in dataset.sequences])
+        transformed = (pooled - fit.model.feature_mean) / fit.model.feature_scale
+        labels = np.concatenate([item.labels for item in fit.assignments.sequences])
+        residuals = transformed - fit.model.clustering_centers[labels]
+        expected_inertia = np.sum(weights * np.square(residuals).sum(axis=1))
+        self.assertAlmostEqual(fit.model.inertia, expected_inertia)
+
+    def test_balanced_weighting_rejects_unweighted_reduction_and_minibatch(self):
+        with self.assertRaisesRegex(ValueError, "does not support PCA"):
+            fit_kmeans_states(
+                self.dataset,
+                n_states=2,
+                seed=9,
+                n_pca_components=1,
+                sample_weight_mode="subject_session_balanced",
+            )
+        with self.assertRaisesRegex(ValueError, "requires algorithm='lloyd'"):
+            fit_kmeans_states(
+                self.dataset,
+                n_states=2,
+                seed=9,
+                algorithm="minibatch",
+                sample_weight_mode="subject_session_balanced",
+            )
 
     def test_prediction_rejects_fit_subject_overlap_by_default(self):
         model = fit_kmeans_states(self.dataset, n_states=2, seed=9, n_init=5).model

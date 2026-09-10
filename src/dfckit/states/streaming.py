@@ -705,6 +705,7 @@ def fit_kmeans_store_materialized(
     reassignment_ratio: float = 0.01,
     n_pca_components: int | None = None,
     subjects: Iterable[str] | None = None,
+    sample_weight_mode: str = "uniform",
 ) -> KMeansFitResult:
     """Fit the exact in-memory sklearn path after reading a selected store cohort.
 
@@ -726,6 +727,7 @@ def fit_kmeans_store_materialized(
         batch_size=batch_size,
         reassignment_ratio=reassignment_ratio,
         n_pca_components=n_pca_components,
+        sample_weight_mode=sample_weight_mode,
     )
     model = replace(
         fit.model,

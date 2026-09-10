@@ -40,6 +40,10 @@ class KMeansStateModel:
     fit_subjects: tuple[str, ...]
     fit_sample_count: int
     implementation: str
+    sample_weight_mode: str = "uniform"
+    sample_weight_sum: float | None = None
+    sample_weight_sum_squares: float | None = None
+    sample_weight_effective_row_count: float | None = None
     clustering_centers: NDArray[np.float64] | None = None
     pca_mean: NDArray[np.float64] | None = None
     pca_components: NDArray[np.float64] | None = None
@@ -71,6 +75,40 @@ class KMeansStateModel:
             if self.pca_explained_variance_ratio is None
             else self.pca_explained_variance_ratio
         )
+        if self.sample_weight_mode not in {"uniform", "subject_session_balanced"}:
+            raise ValueError("KMeans sample_weight_mode is invalid")
+        weight_sum = (
+            float(self.fit_sample_count)
+            if self.sample_weight_sum is None
+            else float(self.sample_weight_sum)
+        )
+        weight_sum_squares = (
+            float(self.fit_sample_count)
+            if self.sample_weight_sum_squares is None
+            else float(self.sample_weight_sum_squares)
+        )
+        effective_row_count = (
+            weight_sum * weight_sum / weight_sum_squares
+            if self.sample_weight_effective_row_count is None
+            else float(self.sample_weight_effective_row_count)
+        )
+        weight_statistics = (weight_sum, weight_sum_squares, effective_row_count)
+        if any(not np.isfinite(value) or value <= 0.0 for value in weight_statistics):
+            raise ValueError("KMeans sample-weight statistics must be finite and positive")
+        if not np.isclose(
+            weight_sum,
+            self.fit_sample_count,
+            rtol=0.0,
+            atol=1e-7 * max(1, self.fit_sample_count),
+        ):
+            raise ValueError("KMeans sample weights must sum to fit_sample_count")
+        if (
+            effective_row_count > self.fit_sample_count + 1e-7
+        ):
+            raise ValueError("KMeans effective row count cannot exceed fit_sample_count")
+        expected_effective = weight_sum * weight_sum / weight_sum_squares
+        if not np.isclose(effective_row_count, expected_effective, rtol=1e-9, atol=1e-12):
+            raise ValueError("KMeans sample-weight statistics are inconsistent")
         arrays = (centers, standardized_centers, clustering, pca_mean, pca_components, explained)
         if any(not np.isfinite(np.asarray(values, dtype=float)).all() for values in arrays):
             raise ValueError("KMeans model arrays must be finite")
@@ -108,6 +146,11 @@ class KMeansStateModel:
         object.__setattr__(self, "pca_mean", _readonly(pca_mean))
         object.__setattr__(self, "pca_components", _readonly(pca_components))
         object.__setattr__(self, "pca_explained_variance_ratio", _readonly(explained))
+        object.__setattr__(self, "sample_weight_sum", weight_sum)
+        object.__setattr__(self, "sample_weight_sum_squares", weight_sum_squares)
+        object.__setattr__(
+            self, "sample_weight_effective_row_count", effective_row_count
+        )
 
 
 @dataclass(frozen=True)
@@ -117,6 +160,39 @@ class KMeansFitResult:
     converged: bool | None = None
     passes_completed: int | None = None
     initialization_passes: tuple[int, ...] = ()
+
+
+def _sample_weights(
+    dataset: FeatureSequenceDataset,
+    mode: str,
+) -> NDArray[np.float64]:
+    if mode not in {"uniform", "subject_session_balanced"}:
+        raise ValueError(
+            "sample_weight_mode must be 'uniform' or 'subject_session_balanced'"
+        )
+    if mode == "uniform":
+        return np.ones(dataset.n_samples, dtype=float)
+
+    group_counts: dict[tuple[str, str | None], int] = {}
+    subject_sessions: dict[str, set[str | None]] = {}
+    for sequence in dataset.sequences:
+        key = (sequence.subject, sequence.session)
+        group_counts[key] = group_counts.get(key, 0) + sequence.n_samples
+        subject_sessions.setdefault(sequence.subject, set()).add(sequence.session)
+
+    n_subjects = len(subject_sessions)
+    pieces = []
+    for sequence in dataset.sequences:
+        key = (sequence.subject, sequence.session)
+        group_mass = dataset.n_samples / (
+            n_subjects * len(subject_sessions[sequence.subject])
+        )
+        pieces.append(
+            np.full(sequence.n_samples, group_mass / group_counts[key], dtype=float)
+        )
+    weights = np.concatenate(pieces)
+    weights *= dataset.n_samples / weights.sum()
+    return weights
 
 
 def _transform_features(
@@ -171,6 +247,7 @@ def fit_kmeans_states(
     n_pca_components: int | None = None,
     batch_size: int = 4096,
     reassignment_ratio: float = 0.01,
+    sample_weight_mode: str = "uniform",
 ) -> KMeansFitResult:
     """Fit reproducible KMeans states in raw or training-fitted PCA space.
 
@@ -195,6 +272,14 @@ def fit_kmeans_states(
         raise ValueError("batch_size must be a positive integer")
     if not np.isfinite(reassignment_ratio) or not 0.0 <= reassignment_ratio <= 1.0:
         raise ValueError("reassignment_ratio must be within [0, 1]")
+    weights = _sample_weights(dataset, sample_weight_mode)
+    if sample_weight_mode != "uniform" and algorithm != "lloyd":
+        raise ValueError("subject_session_balanced weighting requires algorithm='lloyd'")
+    if sample_weight_mode != "uniform" and n_pca_components is not None:
+        raise ValueError(
+            "subject_session_balanced weighting does not support PCA; "
+            "fit in the original feature space or use uniform weighting"
+        )
     try:
         import sklearn
         from sklearn.cluster import KMeans, MiniBatchKMeans
@@ -206,8 +291,13 @@ def fit_kmeans_states(
 
     pooled = np.concatenate([sequence.values for sequence in dataset.sequences], axis=0)
     if standardize_features:
-        mean = pooled.mean(axis=0)
-        scale = pooled.std(axis=0, ddof=0)
+        if sample_weight_mode == "uniform":
+            mean = pooled.mean(axis=0)
+            scale = pooled.std(axis=0, ddof=0)
+        else:
+            mean = np.average(pooled, axis=0, weights=weights)
+            variance = np.average(np.square(pooled - mean), axis=0, weights=weights)
+            scale = np.sqrt(variance)
         scale = np.where(scale < 1e-12, 1.0, scale)
     else:
         mean = np.zeros(pooled.shape[1], dtype=float)
@@ -243,7 +333,11 @@ def fit_kmeans_states(
             max_iter=int(max_iter),
             random_state=int(seed),
             algorithm="lloyd",
-        ).fit(clustering_values)
+        )
+        if sample_weight_mode == "uniform":
+            estimator.fit(clustering_values)
+        else:
+            estimator.fit(clustering_values, sample_weight=weights)
     else:
         estimator = MiniBatchKMeans(
             n_clusters=int(n_states),
@@ -300,6 +394,12 @@ def fit_kmeans_states(
             f"scikit-learn {sklearn.__version__} "
             f"{'KMeans algorithm=lloyd' if algorithm == 'lloyd' else 'MiniBatchKMeans'}; "
             f"{'original standardized feature space' if n_pca_components is None else f'PCA n_components={int(n_pca_components)}'}"
+        ),
+        sample_weight_mode=sample_weight_mode,
+        sample_weight_sum=float(weights.sum()),
+        sample_weight_sum_squares=float(weights @ weights),
+        sample_weight_effective_row_count=float(
+            np.square(weights.sum()) / (weights @ weights)
         ),
     )
     assignments = _assign(model, dataset)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 
 from ..artifacts import (
     StatePredictions,
@@ -31,9 +32,29 @@ from ..states.streaming_hmm import (
 from ..storage import FeatureStore
 
 
+def _load_feature_keys(path):
+    if path is None:
+        return None
+    if not path.is_file() or path.is_symlink():
+        raise ValueError(f"feature-keys file must be an existing non-symlink file: {path}")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("feature-keys JSON must be a non-empty array")
+    if any(not isinstance(key, list) or not key for key in raw):
+        raise ValueError("every feature key must be a non-empty JSON array")
+    return tuple(tuple(str(part) for part in key) for key in raw)
+
+
+def _selected_feature_store(store: FeatureStore, path):
+    keys = _load_feature_keys(path)
+    return store if keys is None else store.select_features(feature_keys=keys)
+
+
 def fit_states(namespace: argparse.Namespace) -> dict[str, object]:
     """Fit one state model from a disk-backed feature store."""
-    store = FeatureStore.open(namespace.store)
+    store = _selected_feature_store(
+        FeatureStore.open(namespace.store), namespace.feature_keys
+    )
     if namespace.output.exists() or namespace.output.is_symlink():
         raise FileExistsError(f"model artifact path already exists: {namespace.output}")
     subjects = None if namespace.subject is None else tuple(namespace.subject)
@@ -43,6 +64,14 @@ def fit_states(namespace: argparse.Namespace) -> dict[str, object]:
             raise ValueError(f"requested fit subjects are absent from the store: {missing}")
 
     if namespace.method == "kmeans":
+        if namespace.sample_weight_mode != "uniform" and (
+            namespace.fitting_mode != "materialized"
+            or namespace.algorithm != "lloyd"
+            or namespace.n_pca_components is not None
+        ):
+            raise ValueError(
+                "subject_session_balanced weights require materialized Lloyd KMeans without PCA"
+            )
         if namespace.fitting_mode == "streaming":
             if namespace.algorithm != "minibatch":
                 raise ValueError("streaming KMeans requires --algorithm minibatch")
@@ -78,6 +107,7 @@ def fit_states(namespace: argparse.Namespace) -> dict[str, object]:
                 reassignment_ratio=namespace.reassignment_ratio,
                 n_pca_components=namespace.n_pca_components,
                 subjects=subjects,
+                sample_weight_mode=namespace.sample_weight_mode,
             )
         model = fit.model
         fit_sequence_count = len(fit.assignments.sequences)
@@ -97,6 +127,7 @@ def fit_states(namespace: argparse.Namespace) -> dict[str, object]:
             "initialization_passes": list(fit.initialization_passes),
             "log_likelihood": None,
             "inertia": model.inertia,
+            "sample_weight_mode": model.sample_weight_mode,
             "init_sample_size": model.init_sample_size,
             "n_pca_components": model.n_pca_components,
             "pca_batch_size": model.pca_batch_size,
@@ -151,7 +182,9 @@ def selected_store_subjects(
 
 def predict_states(namespace: argparse.Namespace) -> dict[str, object]:
     """Decode a feature store with a fitted state model."""
-    store = FeatureStore.open(namespace.store)
+    store = _selected_feature_store(
+        FeatureStore.open(namespace.store), namespace.feature_keys
+    )
     model = load_fitted_model(namespace.model)
     subjects = selected_store_subjects(store, namespace.subject)
     if isinstance(model, KMeansStateModel):
@@ -214,7 +247,9 @@ def score_states(namespace: argparse.Namespace) -> dict[str, object]:
     """Score a fitted state model on selected acquisitions."""
     if namespace.output.exists() or namespace.output.is_symlink():
         raise FileExistsError(f"state-model score output path already exists: {namespace.output}")
-    store = FeatureStore.open(namespace.store)
+    store = _selected_feature_store(
+        FeatureStore.open(namespace.store), namespace.feature_keys
+    )
     model = load_fitted_model(namespace.model)
     subjects = selected_store_subjects(store, namespace.subject)
     if isinstance(model, KMeansStateModel):

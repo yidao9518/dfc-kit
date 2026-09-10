@@ -47,6 +47,10 @@ _KMEANS_METADATA = {
     "n_states",
     "reassignment_ratio",
     "sample_interval_seconds",
+    "sample_weight_effective_row_count",
+    "sample_weight_mode",
+    "sample_weight_sum",
+    "sample_weight_sum_squares",
     "seed",
     "source_contract",
     "standardize_features",
@@ -249,6 +253,10 @@ def _array_payload(model: FittedModel) -> tuple[str, dict[str, object], dict[str
             ),
             "iterations": int(model.iterations),
             "inertia": float(model.inertia),
+            "sample_weight_mode": str(model.sample_weight_mode),
+            "sample_weight_sum": model.sample_weight_sum,
+            "sample_weight_sum_squares": model.sample_weight_sum_squares,
+            "sample_weight_effective_row_count": model.sample_weight_effective_row_count,
         }
         arrays = {name: np.asarray(getattr(model, name)) for name in _KMEANS_ARRAYS}
         return "kmeans-state", metadata, arrays
@@ -425,6 +433,12 @@ def _load_kmeans(
         fit_subjects=_string_tuple(metadata, "fit_subjects"),
         fit_sample_count=fit_sample_count,
         implementation=_string(metadata, "implementation"),
+        sample_weight_mode=_string(metadata, "sample_weight_mode"),
+        sample_weight_sum=_finite_float(metadata, "sample_weight_sum"),
+        sample_weight_sum_squares=_finite_float(metadata, "sample_weight_sum_squares"),
+        sample_weight_effective_row_count=_finite_float(
+            metadata, "sample_weight_effective_row_count"
+        ),
     )
 
 

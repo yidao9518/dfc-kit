@@ -32,6 +32,13 @@ dfc-kit fit-states /path/to/features.store /path/to/models/k4.model \
   --max-iter 100 --streaming-tol 1e-4 \
   --streaming-patience 3 --streaming-min-passes 2
 
+# Exact ordered edge subset with equal participant-session influence.
+dfc-kit fit-states /path/to/features.store /path/to/models/k2.model \
+  --method kmeans --n-states 2 --seed 20260907 \
+  --feature-keys /path/to/edges.json \
+  --fitting-mode materialized --algorithm lloyd \
+  --sample-weight-mode subject_session_balanced
+
 dfc-kit predict-states /path/to/features.store /path/to/models/k4.model \
   /path/to/results/k4.labels --subject sub-010
 
