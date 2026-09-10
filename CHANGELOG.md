@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.2 (unreleased)
+## 1.0.2 - 2026-09-11
 
 - Added exact-feature selection for in-memory and disk-backed state models,
   including clustering on a fixed NBS component's edges.
