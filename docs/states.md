@@ -186,39 +186,63 @@ materialized Lloyd KMeans; incompatible engines are rejected explicitly.
 ## CAP
 
 ```python
-from dfckit.states import fit_cap_states
+from dfckit.states import (
+    cap_sequences,
+    cap_state_maps,
+    fit_cap_states,
+    predict_kmeans_states,
+    summarize_state_assignments,
+)
 
+features = cap_sequences(training_dataset)
 fit = fit_cap_states(training_dataset, n_states=5, seed=20260818)
+maps = cap_state_maps(features, fit.assignments)
+metrics = summarize_state_assignments(fit.assignments)
+
+unseen_features = cap_sequences(unseen_dataset)
+unseen_assignments = predict_kmeans_states(fit.model, unseen_features)
 ```
 
-CAP input consists of instantaneous ROI patterns. Each uninterrupted retained
-segment is centered and scaled ROI by ROI before fitting. The CAP wrapper uses
-MiniBatchKMeans and does not apply a second pooled feature standardization.
-CAP centroids are co-activation patterns, not connectivity matrices.
+CAP uses every retained instantaneous ROI pattern. By default, each ROI is
+centered and scaled over all retained frames of its run (`ddof=0`), with no
+second scaling across participants. Runs need at least two retained frames;
+isolated retained frames still contribute after run-wise scaling. Censor gaps
+remain sequence boundaries for dwell and transition metrics. `fit_cap_states`
+returns a `KMeansFitResult` and defaults to full-data Euclidean Lloyd KMeans
+without PCA (`n_init=20`, `max_iter=300`). Set `algorithm="minibatch"` for
+MiniBatchKMeans. `standardization="segment"` retains the earlier per-segment
+scaling, which omits segments shorter than two frames.
+
+`maps` is a read-only `(n_states, n_rois)` array: for each state, it averages
+the standardized BOLD patterns of frames assigned that final label, with equal
+weight per frame. A state with no assigned frames has a NaN map. These activity
+maps are not FC matrices and do not change the fitted centers or prediction.
 Use `align_cap_centroids` to align repeated CAP fits. Its default is Pearson
 pattern matching; generic KMeans and HMM alignment continues to default to
 standardized Euclidean distance.
 
 For a disk-backed XCP-D cohort, build the equivalent CAP FeatureStore with
 `dfc-kit build-store --method cap` or `write_cap_store`. The store uses the
-source contract `cap:within-segment-roi-zscore-ddof0`, one ROI feature per row,
-and one sequence per uninterrupted retained segment. Its rows preserve the
-original frame indices, and segments shorter than two retained frames are
-omitted. To reproduce the in-memory CAP wrapper from that store, use materialized
-MiniBatchKMeans with `--no-standardize-features`:
+source contract `cap:within-run-roi-zscore-ddof0`, one ROI feature per column,
+and one sequence per uninterrupted retained segment. Its rows preserve original
+frame indices. To fit the same geometry as the in-memory default, use
+materialized Lloyd KMeans without pooled feature standardization:
 
 ```bash
 dfc-kit fit-states cap.store models/cap-k5.model \
   --method kmeans --n-states 5 --seed 20260818 \
   --n-init 20 --max-iter 300 \
-  --fitting-mode materialized --algorithm minibatch \
+  --fitting-mode materialized --algorithm lloyd \
   --no-standardize-features
 ```
 
 Materialized fitting loads the selected cohort and calls one complete
-`MiniBatchKMeans.fit`; it is therefore intended for moderate stores and can
-reproduce historical native geometry. The default CLI path is bounded-memory
-streaming `MiniBatchKMeans.partial_fit`, which is a different fitting contract.
+`KMeans.fit`; it is intended for moderate stores. The default CLI fitting path
+uses bounded-memory streaming `MiniBatchKMeans.partial_fit`, so select
+`--fitting-mode materialized --algorithm lloyd` explicitly for this CAP fit.
+
+For background, see the [original full-frame CAP study](https://pmc.ncbi.nlm.nih.gov/articles/PMC3913885/)
+and an [ROI-pattern CAP study](https://pmc.ncbi.nlm.nih.gov/articles/PMC4386757/).
 
 ## LEiDA states
 

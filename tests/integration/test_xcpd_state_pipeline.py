@@ -1,18 +1,28 @@
+import contextlib
 import csv
 import importlib.util
+import io
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import numpy as np
 
+from dfckit import TimeSeriesDataset
+from dfckit.artifacts import load_fitted_model
+from dfckit.cli import main
 from dfckit.connectivity import ETS, MTD, SlidingWindowFC
 from dfckit.io import load_xcpd_run
 from dfckit.states import (
+    cap_sequences,
+    cap_state_maps,
+    fit_cap_states,
     fit_kmeans_states,
+    predict_kmeans_states,
     summarize_state_assignments,
     window_fc_sequences,
 )
+from dfckit.storage import FeatureStore
 
 HAS_STATES_EXTRA = importlib.util.find_spec("sklearn") is not None
 
@@ -56,6 +66,55 @@ def write_xcpd_run(root: Path, subject: str, shift: float) -> None:
 
 @unittest.skipUnless(HAS_STATES_EXTRA, "requires dfc-kit[states]")
 class XCPDStatePipelineIntegrationTests(unittest.TestCase):
+    def test_cap_cli_matches_python_and_preserves_gaps_after_model_reload(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            xcpd = root / "xcpd"
+            for subject, shift in (("sub-001", 0.0), ("sub-002", 0.2)):
+                write_xcpd_run(xcpd, subject, shift=shift)
+            dataset = TimeSeriesDataset([
+                load_xcpd_run(
+                    xcpd, subject=subject, session="off", atlases="Example", tr=0.8,
+                ).run
+                for subject in ("sub-001", "sub-002")
+            ])
+            for mode in ("run", "segment"):
+                with self.subTest(standardization=mode):
+                    store_path = root / f"cap-{mode}.store"
+                    model_path = root / f"cap-{mode}.model"
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(main([
+                            "build-store", str(xcpd), str(store_path),
+                            "--atlas", "Example", "--tr", "0.8", "--method", "cap",
+                            "--cap-standardization", mode, "--chunk-size", "3",
+                        ]), 0)
+                        self.assertEqual(main([
+                            "fit-states", str(store_path), str(model_path),
+                            "--method", "kmeans", "--n-states", "2", "--seed", "21",
+                            "--n-init", "5", "--fitting-mode", "materialized",
+                            "--algorithm", "lloyd", "--no-standardize-features",
+                        ]), 0)
+                    observed = FeatureStore.open(store_path).read_dataset()
+                    expected = cap_sequences(dataset, standardization=mode)
+                    np.testing.assert_array_equal(
+                        np.concatenate([s.values for s in observed.sequences]),
+                        np.concatenate([s.values for s in expected.sequences]),
+                    )
+                    fit = fit_cap_states(
+                        dataset, n_states=2, seed=21, n_init=5, standardization=mode,
+                    )
+                    reloaded = load_fitted_model(model_path)
+                    np.testing.assert_allclose(reloaded.centers, fit.model.centers)
+                    predicted = predict_kmeans_states(reloaded, observed, allow_fit_subjects=True)
+                    np.testing.assert_allclose(
+                        cap_state_maps(observed, predicted),
+                        cap_state_maps(expected, fit.assignments),
+                    )
+                    for metrics in summarize_state_assignments(predicted):
+                        self.assertEqual(metrics.n_samples, 12)
+                        self.assertEqual(metrics.n_sequences, 2)
+                        self.assertEqual(metrics.n_possible_transitions, 10)
+
     def test_xcpd_to_gap_safe_state_metrics(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

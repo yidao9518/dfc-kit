@@ -47,7 +47,8 @@ future predictions from the returned model already use reference numbering.
 CAP fits use the same `KMeansStateModel` contract but expose a domain-specific
 alignment entry point. Use `align_cap_centroids` for CAP models. It defaults to Pearson matching because
 CAP centres describe relative spatial co-activation configurations after
-within-segment ROI standardization:
+ROI standardization. This matching step is separate from the Euclidean distance
+used to fit the clusters:
 
 ```python
 cap_alignment = align_cap_centroids(reference_cap.model, candidate_cap.model)

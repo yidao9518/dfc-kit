@@ -91,7 +91,7 @@ class FeatureSequenceTests(unittest.TestCase):
             session="off",
             tr=0.8,
         )
-        sequences = cap_sequences(TimeSeriesDataset([run]))
+        sequences = cap_sequences(TimeSeriesDataset([run]), standardization="segment")
 
         self.assertEqual(len(sequences.sequences), 2)
         for sequence in sequences.sequences:
@@ -266,7 +266,7 @@ class KMeansStateTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(predicted.sequences[0].labels, expected)
 
-    def test_cap_uses_minibatch_without_second_global_standardization(self):
+    def test_cap_explicit_minibatch_uses_no_second_global_standardization(self):
         runs = []
         for subject, shift in (("sub-001", 0.0), ("sub-002", 0.2)):
             runs.append(
@@ -283,7 +283,8 @@ class KMeansStateTests(unittest.TestCase):
                 )
             )
         fit = fit_cap_states(
-            TimeSeriesDataset(runs), n_states=2, seed=11, n_init=5, max_iter=50
+            TimeSeriesDataset(runs), n_states=2, seed=11, n_init=5, max_iter=50,
+            standardization="segment", algorithm="minibatch",
         )
 
         self.assertEqual(fit.model.algorithm, "minibatch")

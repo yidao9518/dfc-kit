@@ -63,9 +63,8 @@ is required; that path avoids edge materialization.
 ## Stream CAP
 
 CAP stores contain instantaneous ROI patterns, not ROI-pair edges. The writer
-standardizes every ROI over the complete uninterrupted retained segment with
-population standard deviation (`ddof=0`) and then writes the resulting rows in
-bounded chunks:
+standardizes every ROI across all retained frames of each run with population
+standard deviation (`ddof=0`) and writes rows in bounded chunks:
 
 ```python
 from dfckit.storage import append_cap, write_cap_store
@@ -80,14 +79,16 @@ store = write_cap_store(
 append_cap(store, another_run, chunk_size=256)
 ```
 
-Each retained segment becomes its own FeatureStore sequence. Segments shorter
-than two retained frames are omitted, because a segment-level standardized CAP
-sequence cannot provide a usable temporal sample. Every stored row retains the
-original frame index in both `sample_start_indices` and `sample_end_indices`,
-and censor gaps therefore cannot be joined during later state metrics. The
-source contract is `cap:within-segment-roi-zscore-ddof0`, and the feature keys
-are the ROI names in their input order. Standardization is performed before
-chunking, so changing `chunk_size` does not change CAP values.
+Runs need at least two retained frames. Each retained censor-bounded segment
+becomes its own FeatureStore sequence, including isolated retained frames.
+Every stored row retains its original frame index in both
+`sample_start_indices` and `sample_end_indices`, so later state metrics do not
+join censor gaps. The source contract is `cap:within-run-roi-zscore-ddof0`,
+and the feature keys are the ROI names in input order. Set
+`standardization="segment"` in `write_cap_store` or `append_cap` to use the
+earlier per-segment scaling and omit segments shorter than two frames; its
+source contract is `cap:within-segment-roi-zscore-ddof0`. Standardization
+precedes chunking, so `chunk_size` does not change CAP values.
 
 ## Stream LEiDA
 
@@ -266,7 +267,7 @@ fit = fit_kmeans_store_materialized(
     seed=20260818,
     n_init=20,
     max_iter=300,
-    algorithm="minibatch",
+    algorithm="lloyd",
     standardize_features=False,
 )
 ```
@@ -275,8 +276,8 @@ Materialized fitting loads the selected cohort into memory; it is not an
 out-of-core operation. `algorithm="lloyd"` calls scikit-learn `KMeans.fit`,
 whereas `algorithm="minibatch"` calls `MiniBatchKMeans.fit`. Both retain the
 FeatureStore source contract, feature identities, and selected fit subjects in
-the returned model. CAP rows have already been
-standardized within segment, so CAP reproduction normally uses
+the returned model. CAP rows have already been standardized within run (or
+within segment when requested), so CAP fitting normally uses
 `standardize_features=False`; enabling it adds a second pooled feature
 standardization and changes the fitted geometry.
 
@@ -285,8 +286,8 @@ The two KMeans paths have distinct numerical and memory semantics:
 | Mode | Algorithm | Feature rows in RAM | Estimator operation | Typical use |
 | --- | --- | --- | --- | --- |
 | `streaming` | `minibatch` only | bounded chunks | repeated `partial_fit` passes | large stores |
-| `materialized` | `lloyd` | selected cohort | one `KMeans.fit` call | historical Lloyd fits |
-| `materialized` | `minibatch` | selected cohort | one `MiniBatchKMeans.fit` call | historical CAP/MiniBatch fits |
+| `materialized` | `lloyd` | selected cohort | one `KMeans.fit` call | default in-memory CAP fit |
+| `materialized` | `minibatch` | selected cohort | one `MiniBatchKMeans.fit` call | optional MiniBatch fit |
 
 The streaming path is not a hidden alias for `MiniBatchKMeans.fit`: its
 initialization sample, chunk traversal, and repeated `partial_fit` updates are

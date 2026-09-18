@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- CAP now defaults to within-run ROI z-scoring and full-data Lloyd KMeans;
+  previously the defaults were within-segment z-scoring and MiniBatchKMeans.
+  Isolated retained frames contribute when their run has at least two frames.
+- Added `cap_state_maps` to average standardized ROI activity by assigned state.
+  To retain earlier CAP behavior, choose `standardization="segment"` and
+  `algorithm="minibatch"`; for stores, use
+  `--cap-standardization segment` and a materialized MiniBatch fit.
+
 ## 1.0.2 - 2026-09-11
 
 - Added exact-feature selection for in-memory and disk-backed state models,

@@ -11,9 +11,10 @@ from dfckit.io import load_xcpd_run, discover_xcpd_runs
 ```
 
 `TimeSeriesRun` carries ROI time series, original frame indices, and acquisition
-metadata. XCP-D loaders preserve censor gaps. ETS and CAP perform their required
-within-segment standardization internally; the shared standardization helper is
-an implementation detail rather than a public preprocessing API.
+metadata. XCP-D loaders preserve censor gaps. ETS standardizes within each
+retained segment. CAP standardizes within each run by default, with segment-wise
+scaling available as an option. Both retain segment boundaries for temporal
+summaries.
 
 ## Connectivity
 

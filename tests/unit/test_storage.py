@@ -259,12 +259,13 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
             self.assertTrue(all(chunk.values.shape[0] <= 5 for chunk in store.iter_chunks()))
 
     def test_streamed_cap_matches_materialized_segment_patterns(self):
-        expected = cap_sequences(TimeSeriesDataset((self.run,)))
+        expected = cap_sequences(TimeSeriesDataset((self.run,)), standardization="segment")
         with TemporaryDirectory() as temporary:
             store = write_cap_store(
                 Path(temporary) / "cap",
                 (self.run,),
                 chunk_size=5,
+                standardization="segment",
             )
             observed = store.read_dataset()
 
@@ -280,7 +281,28 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
                 np.testing.assert_array_equal(left.sample_end_indices, right.sample_end_indices)
 
             with self.assertRaisesRegex(ValueError, "already contains"):
-                append_cap(store, self.run, chunk_size=5)
+                append_cap(store, self.run, chunk_size=5, standardization="segment")
+
+    def test_streamed_cap_default_run_matches_materialized_and_keeps_singletons(self):
+        run = TimeSeriesRun(
+            values=np.asarray([[0.0, 1.0], [2.0, 3.0], [9.0, 4.0]]),
+            original_indices=[0, 1, 5],
+            roi_names=("visual", "motor"),
+            subject="sub-001",
+            session="off",
+            tr=0.8,
+        )
+        expected = cap_sequences(TimeSeriesDataset((run,)))
+        with TemporaryDirectory() as temporary:
+            store = write_cap_store(Path(temporary) / "cap", (run,), chunk_size=1)
+            observed = store.read_dataset()
+            self.assertEqual(store.source_contract, "cap:within-run-roi-zscore-ddof0")
+            self.assertEqual([s.n_samples for s in observed.sequences], [2, 1])
+            for left, right in zip(observed.sequences, expected.sequences, strict=True):
+                np.testing.assert_allclose(left.values, right.values)
+                np.testing.assert_array_equal(left.sample_start_indices, right.sample_start_indices)
+            with self.assertRaises(ValueError):
+                append_cap(store, run, standardization="segment")
 
     def test_streamed_cap_reports_cap_when_all_segments_are_too_short(self):
         run = TimeSeriesRun(
@@ -292,7 +314,7 @@ class StreamingEstimatorStoreTests(unittest.TestCase):
             tr=0.8,
         )
         with TemporaryDirectory() as temporary, self.assertRaisesRegex(ValueError, "CAP requires"):
-            write_cap_store(Path(temporary) / "cap", (run,))
+            write_cap_store(Path(temporary) / "cap", (run,), standardization="segment")
 
     def test_stored_leida_matches_materialized_leading_vectors(self):
         estimator = LEiDA(minimum_segment_length=10)

@@ -193,9 +193,8 @@ def align_cap_centroids(
 ) -> StateAlignment:
     """Align CAP state centres, using pattern-shape matching by default.
 
-    CAP centres are relative ROI activation configurations because each input
-    segment is ROI-wise z-scored. Pearson matching therefore compares the
-    spatial configuration without treating a proportional amplitude change as
+    CAP centres describe ROI-wise standardized activity. Pearson matching
+    compares the spatial configuration without treating a proportional amplitude change as
     a different CAP state. Pass ``metric="euclidean"`` when amplitude should
     also contribute to the CAP pairing.
     """

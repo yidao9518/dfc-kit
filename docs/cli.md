@@ -24,6 +24,24 @@ dfc-kit build-store /path/to/xcpd /path/to/features.store \
 All temporal methods preserve original frame indices and never cross a censor
 gap. `--method` accepts `window-fc`, `cap`, `ets`, `mtd`, or `leida`.
 
+For CAP, build a store of instantaneous ROI patterns and fit materialized Lloyd
+KMeans without a second pooled standardization:
+
+```bash
+dfc-kit build-store /path/to/xcpd /path/to/cap.store \
+  --atlas Schaefer200 --space MNI152NLin2009cAsym \
+  --method cap --cap-standardization run
+dfc-kit fit-states /path/to/cap.store /path/to/models/cap-k5.model \
+  --method kmeans --n-states 5 --seed 20260818 \
+  --n-init 20 --max-iter 300 \
+  --fitting-mode materialized --algorithm lloyd --no-standardize-features
+```
+
+`--cap-standardization` defaults to `run`: each ROI is standardized over all
+retained frames of a run, while censor-bounded sequence boundaries remain.
+Choose `segment` for the earlier per-segment scaling. The default `fit-states`
+streaming path is MiniBatchKMeans, not the in-memory CAP Lloyd default.
+
 ## Fit, decode, and score states
 
 ```bash

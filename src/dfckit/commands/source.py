@@ -164,6 +164,7 @@ def build_store(namespace: argparse.Namespace) -> dict[str, object]:
         store = write_cap_store(
             namespace.output,
             dataset.runs,
+            standardization=namespace.cap_standardization,
             chunk_size=namespace.chunk_size,
             dtype=namespace.dtype,
         )

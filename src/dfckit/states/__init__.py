@@ -11,7 +11,7 @@ from .alignment import (
     relabel_gaussian_hmm_model,
     relabel_kmeans_model,
 )
-from .cap import cap_sequences, fit_cap_states
+from .cap import cap_sequences, cap_state_maps, fit_cap_states
 from .cross_validation import SubjectValidationFold, make_subject_validation_folds
 from .data import (
     FeatureSequence,
@@ -77,6 +77,7 @@ __all__ = [
     "apply_gaussian_hmm_alignment",
     "apply_state_alignment",
     "cap_sequences",
+    "cap_state_maps",
     "compare_state_model_scores",
     "fit_cap_states",
     "fit_gaussian_hmm_states",

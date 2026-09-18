@@ -71,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--window-step", type=int, default=8)
     build.add_argument("--taper", choices=("hamming", "uniform"), default="hamming")
     build.add_argument("--minimum-segment-length", type=int, default=20)
+    build.add_argument(
+        "--cap-standardization", choices=("run", "segment"), default="run",
+        help="CAP ROI z-score scope; run uses all retained frames per acquisition",
+    )
 
     information = subparsers.add_parser(
         "fixed-information",

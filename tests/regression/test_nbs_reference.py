@@ -116,9 +116,11 @@ class AuditedNBSRegressionTests(unittest.TestCase):
             -0.4986254530585023,
         ]
         threshold_two = result.at_threshold(2.0)
-        np.testing.assert_array_equal(threshold_two.observed_t, expected_t)
-        np.testing.assert_array_equal(
-            threshold_two.observed_mean_difference, expected_mean
+        # LAPACK/NumPy builds can differ in the last floating-point bit.
+        # Component membership and permutation counts below remain exact checks.
+        np.testing.assert_allclose(threshold_two.observed_t, expected_t, rtol=1e-13, atol=1e-14)
+        np.testing.assert_allclose(
+            threshold_two.observed_mean_difference, expected_mean, rtol=1e-13, atol=1e-14
         )
         np.testing.assert_array_equal(
             threshold_two.null_positive,
