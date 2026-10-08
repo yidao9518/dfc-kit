@@ -14,6 +14,15 @@ FeatureStore accepts only the current manifest schema. Every sequence record
 therefore has an explicit acquisition field, which may be `None` when no
 acquisition label is available.
 
+## Storage versus computation caches
+
+dfc-kit does not automatically cache computed results across calls. Numerical
+analysis calls recompute their outputs; disk storage is explicit through store
+writers and artifact save/load functions. Creating a store at an existing path
+raises an error rather than silently reusing its contents. To compute features
+without writing them to disk, use the estimator's in-memory API, such as
+`SlidingWindowFC.transform(run)`, instead of a store writer.
+
 ## Stream sliding-window FC
 
 ```python
@@ -129,6 +138,11 @@ sequence_part = store.read_sequence(
 
 append_window_fc(store, another_run, estimator, chunk_size=128)
 ```
+
+`iter_chunks()` uses read-only memory mapping by default. Pass `mmap=False` to
+load each chunk into ordinary NumPy arrays instead. This controls how existing
+files are read, not whether previous computations are reused. Neither mode
+disables the operating system's filesystem cache.
 
 `read_dataset()` reconstructs ordinary `FeatureSequenceDataset` objects for
 existing in-memory state APIs. For genuinely large analyses, iterate chunks or

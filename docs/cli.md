@@ -6,6 +6,11 @@ whole-edge window-pattern and low-rank covariance endpoints, information
 estimates, state fitting,
 decoding, scoring, alignment, repeated-fit stability, and paired inference.
 
+Commands do not automatically reuse previous computation results. Store and
+model inputs are loaded only when explicitly supplied; output paths name saved
+results, not cache directories. `build-store` and `fit-states` require new output
+paths and fail if those paths already exist.
+
 ## Inspect and build a FeatureStore
 
 ```bash

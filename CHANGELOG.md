@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.3 - 2026-10-08
 
 - CAP now defaults to within-run ROI z-scoring and full-data Lloyd KMeans;
   previously the defaults were within-segment z-scoring and MiniBatchKMeans.
@@ -9,6 +9,9 @@
   To retain earlier CAP behavior, choose `standardization="segment"` and
   `algorithm="minibatch"`; for stores, use
   `--cap-standardization segment` and a materialized MiniBatch fit.
+- Clarified that result storage is explicit and computations are not automatically
+  cached across calls. Memory-mapped reads can be disabled with `mmap=False`;
+  this changes file loading, not computation reuse or operating-system caching.
 
 ## 1.0.2 - 2026-09-11
 
