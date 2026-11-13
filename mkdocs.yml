@@ -22,6 +22,7 @@ nav:
       - Low-rank covariance: lowrank.md
       - Information: information.md
       - Partition graphs: partition_graphs.md
+  - Plotting: plotting.md
   - State methods:
       - State models: states.md
       - State alignment: state_alignment.md

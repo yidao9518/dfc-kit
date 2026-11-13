@@ -34,8 +34,9 @@ The toolkit is organized around four public layers:
 
 The package starts after XCP-D. It does not reimplement denoising, filtering,
 censoring, interpolation, or parcellation. Cohort inclusion, disease-specific
-ROI definitions, clinical variables, plots, and manuscript logic belong in the
-downstream study repository.
+ROI definitions, clinical variables, manuscript-specific layouts and scientific
+interpretation belong in the downstream study repository. Optional
+[plotting helpers](plotting.md) provide composable displays of existing results.
 
 Start with [Getting started](getting_started.md), inspect the [XCP-D input
 contract](xcpd_input.md), or follow the complete [XCP-D-to-state

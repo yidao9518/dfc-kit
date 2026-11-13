@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0 - 2026-11-13
+
+- Added optional Matplotlib plotting helpers for ROI rings, signed connectivity
+  matrices, paired observations, effect distributions, association scatters,
+  comparison curves and permutation histograms. Inputs and uncertainty are
+  explicit, plots compose through axes, and inference is not rerun while drawing.
+- Added a synthetic-only plotting gallery with PNG, editable SVG and PDF export.
+- Updated the plotting style with shared system/sign/condition palettes,
+  open-diamond summaries, complete ROI rings with pale unconnected segments,
+  full-range raincloud effects, filled association marginals and explicit
+  asymmetric matrix scales. Added a temporary publication-style context.
+
 ## 1.0.3 - 2026-10-08
 
 - CAP now defaults to within-run ROI z-scoring and full-data Lloyd KMeans;

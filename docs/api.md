@@ -1,5 +1,16 @@
 # API map
 
+## Plotting
+
+`dfckit.plotting` provides `plot_ring_network`, `plot_connectivity_matrix`,
+`plot_paired`, `plot_effects`, `plot_association`, `plot_curve` and
+`plot_null_distribution`. Each accepts explicit arrays and optional Matplotlib
+axes, without performing statistical inference. See [Plotting](plotting.md).
+Matplotlib is available through the optional `dfc-kit[plotting]` extra.
+`publication_style` supplies a temporary white-background/vector-text style;
+`SYSTEM_PALETTE`, `CONDITION_PALETTE`, `POSITIVE_COLOR` and `NEGATIVE_COLOR`
+keep colour roles consistent across rings, matrices, rainclouds and scatters.
+
 `dfc-kit` exposes immutable result objects and composable numerical kernels.
 Public names should be imported from the package area that owns the operation.
 

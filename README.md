@@ -41,6 +41,11 @@ for larger datasets, with matching Python and command-line interfaces.
   batch-wise fitting for MiniBatch KMeans and Incremental PCA.
 - **Portable results:** models and held-out predictions stored as JSON and
   NumPy arrays with explicit feature, subject, and parameter metadata.
+- **Optional plotting:** segmented ROI rings, signed matrices,
+  paired observations, raincloud effects, association scatters with optional
+  marginals, comparison curves and permutation histograms. A temporary
+  publication style unifies colours and editable vector text;
+  see [Plotting](docs/plotting.md).
 
 The [method inventory](docs/method_inventory.md) maps each method family to its
 public API and guide. Public data, connectivity, state, reference, and
